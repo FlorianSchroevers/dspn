@@ -13,6 +13,7 @@ import scipy.optimize
 import numpy as np
 from tqdm import tqdm
 import matplotlib
+import matplotlib.pyplot as plt
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -93,7 +94,8 @@ def main():
     parser.add_argument(
         "--full-eval",
         action="store_true",
-        help="Use full evaluation set (default: 1/10 of evaluation data)",  # don't need full evaluation when training to save some time
+        help="Use full evaluation set (default: 1/10 of evaluation data)",
+        # don't need full evaluation when training to save some time
     )
     parser.add_argument(
         "--mask-feature",
@@ -143,12 +145,19 @@ def main():
     if args.dataset == "mnist":
         dataset_train = data.MNISTSet(train=True, full=args.full_eval)
         dataset_test = data.MNISTSet(train=False, full=args.full_eval)
-    else:
+    elif args.dataset in ["clevr-box", "clevr-state"]:
         dataset_train = data.CLEVR(
             "clevr", "train", box=args.dataset == "clevr-box", full=args.full_eval
         )
         dataset_test = data.CLEVR(
             "clevr", "val", box=args.dataset == "clevr-box", full=args.full_eval
+        )
+    elif args.dataset == "cats":
+        dataset_train = data.CLEVR(
+            "cats", "train", full=args.full_eval
+        )
+        dataset_test = data.CLEVR(
+            "cats", "val", full=args.full_eval
         )
 
     if not args.eval_only:
@@ -336,14 +345,28 @@ def main():
                         binned=args.dataset.startswith("clevr"),
                         threshold=0.5 if args.dataset.startswith("clevr") else None,
                     )
-                    tag_name = f"{name}" if j != len(progress) - 1 else f"{name}-target"
+                    if j != len(progress) - 1:
+                        tag_name = f"{name}"
+                    else:
+                        tag_name = f"{name}-target"
+
                     if args.dataset == "clevr-box":
                         img = input[0].detach().cpu()
                         writer.add_image_with_boxes(
                             tag_name, img, s.transpose(0, 1), global_step=j
                         )
-                    elif args.dataset == "clevr-state":
-                        pass
+                    elif args.dataset == "cats":
+                        img = input[0].detach().cpu()
+
+                        fig = plt.figure()
+                        plt.scatter(s[0, 0:2]*128, s[1, 0:2]*128, c='r')
+                        plt.scatter(s[0, 2:]*128, s[1, 2:]*128)
+
+                        plt.imshow(np.transpose(img, (1, 2, 0)))
+
+                        writer.add_image(
+                            tag_name, fig, global_step=j
+                        )
                     else:  # mnist
                         fig = plt.figure()
                         y, x = s
@@ -384,7 +407,8 @@ def main():
 
     import subprocess
 
-    git_hash = subprocess.check_output(["git", "rev-parse", "HEAD"])
+    # git_hash = subprocess.check_output(["git", "rev-parse", "HEAD"])
+    git_hash = "483igtrfiuey46"
 
     torch.backends.cudnn.benchmark = True
 

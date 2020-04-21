@@ -257,14 +257,107 @@ class CLEVR(torch.utils.data.Dataset):
             return len(self.scenes) // 10
 
 
+class Faces(torch.utils.data.Dataset):
+    def __init__(self, base_path, split, full=False):
+        assert split in {
+            "train",
+            "val",
+            "test",
+        }  # note: test isn't very useful since it doesn't have ground-truth scene information
+        self.base_path = base_path
+        self.split = split
+        self.max_objects = 10
+        self.full = full  # Use full validation set?
+
+        with self.img_db() as db:
+            ids = db["image_ids"]
+            self.image_id_to_index = {id: i for i, id in enumerate(ids)}
+        self.image_db = self.img_db()
+
+        self.keypoints = self.prepare_keypoints()
+
+    def prepare_keypoints(self):
+        keypoints = []
+
+        for fname in os.listdir(self.keypoint_folder):
+            if not fname.endswith(".cat"):
+                continue
+
+            with open(os.path.join(self.keypoint_folder, fname), "r") as f:
+                # read an image to get its dimensions. In the cats dataset
+                # the dimensions are not uniform. 
+                # this does not load the entire image into memory
+                img_path = os.path.join(self.keypoint_folder, fname[:-4])
+                im_x, im_y = Image.open(img_path).size
+
+                # there are 19 numbers in the .cat file, the first of which 
+                # denotes the number of keypoints. the coordinates of 
+                # keypoints are given by the remaining 18 numbers, 
+                # where consecutive numbers denote an x, y coordinate.
+                # we can remove the 0th element and there is a trailing 
+                # whitespace we can remove
+                nums = f.read().split(" ")[1:-1]
+                coords_flat = np.array([int(n) for n in nums])
+
+                # get into right shape and adjust for image size
+                coords = coords_flat.reshape(-1, 2).T / [[im_x], [im_y]]
+                n_objects = coords.shape[1]
+                
+                if n_objects > self.max_objects:
+                    raise IndexError("Number of objects exceeds estimated"
+                                     "max number of object")
+                
+                # overlay objects on zero array holding up to max_objects
+                objects = np.zeros(shape=(2, self.max_objects))
+                objects[:, :n_objects] = coords
+            
+            objects = torch.FloatTensor(objects)
+
+            # fill in masks
+            mask = torch.zeros(self.max_objects)
+            mask[:n_objects] = 1
+
+            keypoints.append((objects, mask))
+
+        return keypoints
+
+    @property
+    def images_folder(self):
+        return os.path.join(self.base_path, "images", self.split)
+
+    @property
+    def keypoint_folder(self):
+        if self.split == "test":
+            raise ValueError("Keypoints are not available for test")
+        return self.images_folder
+
+    def img_db(self):
+        path = os.path.join(self.base_path, f"{self.split}-images.h5")
+        return h5py.File(path, "r")
+
+    def __getitem__(self, item):
+        image = self.image_db["images"][item]
+        keypoints, size = self.keypoints[item]
+        return image, keypoints, size
+
+    def __len__(self):
+        if self.split == "train" or self.full:
+            return len(self.keypoints)
+        else:
+            return len(self.keypoints) // 10
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+    from PIL import Image
 
-    dataset = Circles()
-    for i in range(2):
-        points, centre, n_points = dataset[i]
-        x, y = points[0], points[1]
-        plt.scatter(x.numpy(), y.numpy())
-        plt.scatter(centre[0], centre[1])
-    plt.axes().set_aspect("equal", "datalim")
+    dataset = Faces("cats", "train")
+
+    img, keypoints, size = dataset[np.random.randint(len(dataset))]
+
+    fig = plt.figure()
+    plt.scatter(keypoints[0, 0:2]*128, keypoints[1, 0:2]*128, c='r')
+    plt.scatter(keypoints[0, 2:]*128, keypoints[1, 2:]*128)
+
+    plt.imshow(np.transpose(img, (1, 2, 0)))
     plt.show()
