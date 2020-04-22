@@ -60,7 +60,7 @@ def main():
     )
     parser.add_argument(
         "--dataset",
-        choices=["mnist", "clevr-box", "clevr-state"],
+        choices=["mnist", "clevr-box", "clevr-state", "cats"],
         help="Use MNIST dataset",
     )
     parser.add_argument(
@@ -153,10 +153,10 @@ def main():
             "clevr", "val", box=args.dataset == "clevr-box", full=args.full_eval
         )
     elif args.dataset == "cats":
-        dataset_train = data.CLEVR(
+        dataset_train = data.Faces(
             "cats", "train", full=args.full_eval
         )
-        dataset_test = data.CLEVR(
+        dataset_test = data.Faces(
             "cats", "val", full=args.full_eval
         )
 
@@ -180,6 +180,8 @@ def main():
         test_last=track.Mean(),
         test_loss=track.Mean(),
     )
+
+    print(args.num_workers)
 
     if args.resume:
         log = torch.load(args.resume)
@@ -357,6 +359,19 @@ def main():
                         )
                     elif args.dataset == "cats":
                         img = input[0].detach().cpu()
+                        # from matplotlib.backends.backend_agg import FigureCanvas
+
+                        # from matplotlib.figure import Figure
+
+                        # fig = Figure()
+
+                        # ax = fig.subplots()
+                        # ax.plot([1, 2, 3])
+                        # ax.set_title('a simple figure')
+                        # # Force a draw so we can grab the pixel buffer
+                        # canvas.draw()
+                        # # grab the pixel buffer and dump it into a numpy array
+                        # X = np.array(canvas.renderer.buffer_rgba())
 
                         fig = plt.figure()
                         plt.scatter(s[0, 0:2]*128, s[1, 0:2]*128, c='r')
@@ -364,7 +379,7 @@ def main():
 
                         plt.imshow(np.transpose(img, (1, 2, 0)))
 
-                        writer.add_image(
+                        writer.add_figure(
                             tag_name, fig, global_step=j
                         )
                     else:  # mnist
@@ -435,4 +450,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Process interrupted by user, emptying cache...")
+        torch.cuda.empty_cache()
+

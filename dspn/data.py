@@ -11,8 +11,10 @@ import torchvision.transforms.functional as T
 import h5py
 import numpy as np
 
+from PIL import Image
 
-def get_loader(dataset, batch_size, num_workers=8, shuffle=True):
+
+def get_loader(dataset, batch_size, num_workers=1, shuffle=True):
     return torch.utils.data.DataLoader(
         dataset,
         shuffle=shuffle,

@@ -23,7 +23,7 @@ def build_net(args):
         set_size = 10
     elif args.dataset == "cats":
         set_channels = 2
-        set_size = 9
+        set_size = 10
 
     use_convolution = args.dataset in ["clevr-box", "clevr-state", "cats"]
     hidden_dim = args.dim
