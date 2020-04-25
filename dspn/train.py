@@ -1,6 +1,7 @@
 import os
 import argparse
 from datetime import datetime
+import time
 
 import torch
 import torch.nn.functional as F
@@ -61,7 +62,7 @@ def main():
     parser.add_argument(
         "--dataset",
         choices=["mnist", "clevr-box", "clevr-state", "cats"],
-        help="Use MNIST dataset",
+        help="Which dataset to use",
     )
     parser.add_argument(
         "--no-cuda",
@@ -77,6 +78,10 @@ def main():
     parser.add_argument("--multi-gpu", action="store_true", help="Use multiple GPUs")
     parser.add_argument(
         "--show", action="store_true", help="Plot generated samples in Tensorboard"
+    )
+
+    parser.add_argument(
+        "--infer-name", action="store_true", help="Automatically name run based on dataset/run number"
     )
 
     parser.add_argument("--supervised", action="store_true", help="")
@@ -128,7 +133,29 @@ def main():
     )
     args = parser.parse_args()
 
-    train_writer = SummaryWriter(f"runs/{args.name}", purge_step=0)
+
+
+    if args.infer_name:
+        if args.baseline:
+            prefix = "base"
+        else:
+            prefix = "dspn"
+
+        used_nums = []
+        runs = os.listdir("runs/")
+        for run in runs:
+            if args.dataset in run:
+                used_nums.append(int(run.split("-")[-1]))
+
+        num = 1
+        while num in used_nums:
+            num += 1
+        name = f"{prefix}-{args.dataset}-{num}"
+    else:
+        name = args.name
+
+    print(f"Saving run to runs/{name}")
+    train_writer = SummaryWriter(f"runs/{name}", purge_step=0)
 
     net = model.build_net(args)
 
@@ -142,6 +169,7 @@ def main():
         [p for p in net.parameters() if p.requires_grad], lr=args.lr
     )
 
+    print("Building dataloader")
     if args.dataset == "mnist":
         dataset_train = data.MNISTSet(train=True, full=args.full_eval)
         dataset_test = data.MNISTSet(train=False, full=args.full_eval)
@@ -181,7 +209,6 @@ def main():
         test_loss=track.Mean(),
     )
 
-    print(args.num_workers)
 
     if args.resume:
         log = torch.load(args.resume)
@@ -359,23 +386,9 @@ def main():
                         )
                     elif args.dataset == "cats":
                         img = input[0].detach().cpu()
-                        # from matplotlib.backends.backend_agg import FigureCanvas
-
-                        # from matplotlib.figure import Figure
-
-                        # fig = Figure()
-
-                        # ax = fig.subplots()
-                        # ax.plot([1, 2, 3])
-                        # ax.set_title('a simple figure')
-                        # # Force a draw so we can grab the pixel buffer
-                        # canvas.draw()
-                        # # grab the pixel buffer and dump it into a numpy array
-                        # X = np.array(canvas.renderer.buffer_rgba())
 
                         fig = plt.figure()
-                        plt.scatter(s[0, 0:2]*128, s[1, 0:2]*128, c='r')
-                        plt.scatter(s[0, 2:]*128, s[1, 2:]*128)
+                        plt.scatter(s[0, :]*128, s[1, :]*128)
 
                         plt.imshow(np.transpose(img, (1, 2, 0)))
 
@@ -427,6 +440,9 @@ def main():
 
     torch.backends.cudnn.benchmark = True
 
+    print("Running")
+    start = time.time()
+
     for epoch in range(args.epochs):
         tracker.new_epoch()
         with mp.Pool(10) as pool:
@@ -436,7 +452,7 @@ def main():
                 run(net, test_loader, optimizer, train=False, epoch=epoch, pool=pool)
 
         results = {
-            "name": args.name,
+            "name": name,
             "tracker": tracker.data,
             "weights": net.state_dict()
             if not args.multi_gpu
@@ -444,9 +460,12 @@ def main():
             "args": vars(args),
             "hash": git_hash,
         }
-        torch.save(results, os.path.join("logs", args.name))
+        torch.save(results, os.path.join("logs", name))
         if args.eval_only:
             break
+
+    took = start-time.time()
+    print(f"Process took {took} seconds, avg {took/args.epochs} s/epoch.")
 
 
 if __name__ == "__main__":

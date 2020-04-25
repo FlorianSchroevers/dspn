@@ -232,11 +232,11 @@ class CLEVR(torch.utils.data.Dataset):
         if self.split == "test":
             raise ValueError("Scenes are not available for test")
         return os.path.join(
-            self.base_path, "scenes", "CLEVR_{}_scenes.json".format(self.split)
+            self.base_path, "scenes", f"CLEVR_{self.split}_scenes.json"
         )
 
     def img_db(self):
-        path = os.path.join(self.base_path, "{}-images.h5".format(self.split))
+        path = os.path.join(self.base_path, f"{self.split}-images.h5")
         return h5py.File(path, "r")
 
     def load_image(self, image_id):
