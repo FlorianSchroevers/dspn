@@ -22,11 +22,13 @@ class DatasetImages(torch.utils.data.Dataset):
             self.id_to_filename = self._find_images_clevr()
         elif "cats" in path:
             self.id_to_filename = self._find_images_cats()
+        elif "faces" in path:
+            self.id_to_filename = self._find_images_faces()
 
         self.sorted_ids = sorted(
             self.id_to_filename.keys()
         )  # used for deterministic iteration order
-        print("found {} images in {}".format(len(self), self.path))
+        print(f"found {len(self)} images in {self.path}")
         self.transform = transform
 
     def _find_images_clevr(self):
@@ -50,6 +52,9 @@ class DatasetImages(torch.utils.data.Dataset):
                 print("non_unique IDS found")
             id_to_filename[id] = filename
         return id_to_filename
+
+    def _find_images_faces(self):
+        return {int(f.split('.')[0]): f for f in os.listdir(self.path) if f.endswith(".png")}
 
     def __getitem__(self, item):
         id = self.sorted_ids[item]
@@ -101,7 +106,7 @@ def main(dataset):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset", default="cats", help="Dataset to process (cats/clevr)", choices=["cats", "clevr"]
+        "--dataset", default="cats", help="Dataset to process (cats/clevr)", choices=["cats", "clevr", "faces"]
     )
 
     args = parser.parse_args()

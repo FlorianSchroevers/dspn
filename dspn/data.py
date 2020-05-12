@@ -88,9 +88,8 @@ CLASSES = {
     "size": ["large", "small"],
 }
 
-
-class CLEVR(torch.utils.data.Dataset):
-    def __init__(self, base_path, split, box=False, full=False):
+class ImageDataset(torch.utils.data.Dataset):
+    def __init__(self, base_path, split, max_objects, full=False):
         assert split in {
             "train",
             "val",
@@ -98,18 +97,57 @@ class CLEVR(torch.utils.data.Dataset):
         }  # note: test isn't very useful since it doesn't have ground-truth scene information
         self.base_path = base_path
         self.split = split
-        self.max_objects = 10
-        self.box = box  # True if clevr-box version, False if clevr-state version
-        self.full = full  # Use full validation set?
+        self.max_objects = max_objects
+        self.full = full # Use full validation set?
 
+        # the following only works if the index is not enumerated (string or
+        # random numbers), overwrite if necesarry
         with self.img_db() as db:
             ids = db["image_ids"]
             self.image_id_to_index = {id: i for i, id in enumerate(ids)}
-        self.image_db = None
+
+        self.image_db = self.img_db()
+
+    @property
+    def images_folder(self):
+        return os.path.join(self.base_path, "images", self.split)
+
+    def img_db(self):
+        path = os.path.join(self.base_path, f"{self.split}-images.h5")
+        return h5py.File(path, "r")
+
+    def __getitem__(self, item):
+        img_id = self.image_db["image_ids"][item]
+        img_idx = self.image_id_to_index[img_id]
+
+        targets, size = self.targets[img_idx]
+        image = self.image_db["images"][item]
+        return image, targets, size
+
+    def __len__(self):
+        if self.split == "train" or self.full:
+            return len(self.image_db["images"])
+        else:
+            return len(self.image_db["images"]) // 10
+
+
+class CLEVR(ImageDataset):
+    def __init__(self, base_path, split, box=False, full=False):
+        super().__init__(base_path, split, 10, full)
+
+        self.box = box
 
         with open(self.scenes_path) as fd:
             scenes = json.load(fd)["scenes"]
-        self.img_ids, self.scenes = self.prepare_scenes(scenes)
+        self.img_ids, self.targets = self.prepare_scenes(scenes)
+
+    def display(item):
+        img, targets, size = self.__getitem__[item]
+
+        plt.scatter(targets[0, :]*128, targets[1, :]*128, c='r')
+
+        plt.imshow(np.transpose(img, (1, 2, 0)))
+        plt.show()
 
     def object_to_fv(self, obj):
         coords = [p / 3 for p in obj["3d_coords"]]
@@ -127,7 +165,7 @@ class CLEVR(torch.utils.data.Dataset):
 
     def prepare_scenes(self, scenes_json):
         img_ids = []
-        scenes = []
+        targets = []
         for scene in scenes_json:
             img_idx = scene["image_index"]
             # different objects depending on bbox version or attribute version of CLEVR sets
@@ -152,8 +190,8 @@ class CLEVR(torch.utils.data.Dataset):
             mask[:num_objects] = 1
 
             img_ids.append(img_idx)
-            scenes.append((objects, mask))
-        return img_ids, scenes
+            targets.append((objects, mask))
+        return img_ids, targets
 
     def extract_bounding_boxes(self, scene):
         """
@@ -224,10 +262,6 @@ class CLEVR(torch.utils.data.Dataset):
         return xmin, ymin, xmax, ymax
 
     @property
-    def images_folder(self):
-        return os.path.join(self.base_path, "images", self.split)
-
-    @property
     def scenes_path(self):
         if self.split == "test":
             raise ValueError("Scenes are not available for test")
@@ -235,61 +269,31 @@ class CLEVR(torch.utils.data.Dataset):
             self.base_path, "scenes", f"CLEVR_{self.split}_scenes.json"
         )
 
-    def img_db(self):
-        path = os.path.join(self.base_path, f"{self.split}-images.h5")
-        return h5py.File(path, "r")
-
-    def load_image(self, image_id):
-        if self.image_db is None:
-            self.image_db = self.img_db()
-        index = self.image_id_to_index[image_id]
-        image = self.image_db["images"][index]
-        return image
-
-    def __getitem__(self, item):
-        image_id = self.img_ids[item]
-        image = self.load_image(image_id)
-        objects, size = self.scenes[item]
-        return image, objects, size
-
-    def __len__(self):
-        if self.split == "train" or self.full:
-            return len(self.scenes)
-        else:
-            return len(self.scenes) // 10
-
-
-class Faces(torch.utils.data.Dataset):
+class Cats(ImageDataset):
     def __init__(self, base_path, split, full=False):
-        assert split in {
-            "train",
-            "val",
-            "test",
-        }  # note: test isn't very useful since it doesn't have ground-truth scene information
-        self.base_path = base_path
-        self.split = split
-        self.max_objects = 10
-        self.full = full  # Use full validation set?
+        super().__init__(base_path, split, 10, full)
 
-        with self.img_db() as db:
-            ids = db["image_ids"]
-            self.image_id_to_index = {id: i for i, id in enumerate(ids)}
-        self.image_db = self.img_db()
+        ids, self.targets = self.prepare_keypoints()
 
-        self.keypoints = self.prepare_keypoints()
+        self.image_id_to_index = {img_id: i for i, img_id in enumerate(ids)}
 
     def prepare_keypoints(self):
-        keypoints = []
+        targets = []
+        ids = []
 
-        for fname in os.listdir(self.keypoint_folder):
+        # for img_id in self.image_db["image_ids"]:
+        for fname in os.listdir(self.images_folder):
+            # fname = str(img_id)[:9] + "_" + str(img_id)[10:] + ".jpg.cat"
+            # print(img_id)
+
             if not fname.endswith(".cat"):
                 continue
 
-            with open(os.path.join(self.keypoint_folder, fname), "r") as f:
+            with open(os.path.join(self.images_folder, fname), "r") as f:
                 # read an image to get its dimensions. In the cats dataset
                 # the dimensions are not uniform. 
                 # this does not load the entire image into memory
-                img_path = os.path.join(self.keypoint_folder, fname[:-4])
+                img_path = os.path.join(self.images_folder, fname[:-4])
                 im_x, im_y = Image.open(img_path).size
 
                 # there are 19 numbers in the .cat file, the first of which 
@@ -319,47 +323,118 @@ class Faces(torch.utils.data.Dataset):
             mask = torch.zeros(self.max_objects)
             mask[:n_objects] = 1
 
-            keypoints.append((objects, mask))
+            targets.append((objects, mask))
+            ids.append(int(fname.split(".")[0].replace("_", "")))
 
-        return keypoints
+        return ids, targets
 
-    @property
-    def images_folder(self):
-        return os.path.join(self.base_path, "images", self.split)
 
-    @property
-    def keypoint_folder(self):
-        if self.split == "test":
-            raise ValueError("Keypoints are not available for test")
-        return self.images_folder
+class Faces(ImageDataset):
+    def __init__(self, base_path, split, full=False):
+        super().__init__(base_path, split, 10, full)
 
-    def img_db(self):
-        path = os.path.join(self.base_path, f"{self.split}-images.h5")
-        return h5py.File(path, "r")
+        self.targets = self.prepare_keypoints()
 
+    def prepare_keypoints(self):
+
+        # there are multiple keypoints per major feature (left eye, right eye.
+        # nose and mouth), so we want to calculate the mean of those keypoints
+        # per major feature, these are the indices for those features
+        left_eye_x_indices = [0, 4, 6, 12, 14]
+        left_eye_y_indices = [1, 5, 7, 13, 15]
+        right_eye_x_indices = [2, 8, 10, 16, 18]
+        right_eye_y_indices = [3, 9, 11, 17, 19]
+        nose__x_indices = [20]
+        nose__y_indices = [21]
+        mouth_x_indices = [22, 24, 26, 28]
+        mouth_y_indices = [23, 25, 27, 29]
+
+        # a dict mapping the final position in the array to one of the major facial keypoints
+        features = {
+            0: (left_eye_x_indices, left_eye_y_indices),
+            1: (right_eye_x_indices, right_eye_y_indices),
+            2: (nose__x_indices, nose__y_indices),
+            3: (mouth_x_indices, mouth_y_indices)
+        }
+        
+        keypoints_array = np.genfromtxt(
+            os.path.join(self.base_path, "facial_keypoints.csv"),
+            delimiter=',',
+            # usecols = keypoints_to_keep,
+            missing_values = 0
+        )
+
+        keypoints_array = np.nan_to_num(keypoints_array, copy=False)
+
+        targets = []
+        for img_keypoints in keypoints_array:
+            # four keypoints, x and y components
+            coords = np.empty((2, 4))
+
+            # calculate means without zeros, and normalize by dividing by 
+            # image size (96x96)
+            for i in features:
+                for dim in [0, 1]:
+                    total = img_keypoints[features[i][dim]].sum()
+                    count = (img_keypoints[features[i][dim]] != 0).sum()
+                    # in case the count is zero, the value should just be zero
+                    if count == 0:
+                        coords[dim, i] = 0
+                    else:
+                        coords[dim, i] = (total / count) / 96
+
+
+            # overlay objects on zero array holding up to max_objects
+            objects = np.zeros(shape=(2, self.max_objects))
+            objects[:, :coords.shape[1]] = coords
+            
+            objects = torch.FloatTensor(objects)
+
+            # fill in masks
+            mask = torch.zeros(self.max_objects)
+            mask[:coords.shape[1]] = 1
+
+            targets.append((objects, mask))
+
+
+        return targets
+
+class MergedDataset(torch.utils.data.Dataset):
+    def __init__(self, *datasets):
+        self.targets = []
+        self.datasets = datasets
+
+        for i in range(1, len(datasets)):
+            assert datasets[i].max_objects == datasets[i - 1].max_objects
+            
     def __getitem__(self, item):
-        image = self.image_db["images"][item]
-        keypoints, size = self.keypoints[item]
-        return image, keypoints, size
+        total = 0
+        for dataset in self.datasets:
+            if item < len(dataset) + total:
+                return dataset[item - total - 1]
+            else:
+                total += len(dataset)
+
+        raise IndexError()
 
     def __len__(self):
-        if self.split == "train" or self.full:
-            return len(self.keypoints)
-        else:
-            return len(self.keypoints) // 10
-
+        return sum([len(ds) for ds in self.datasets])
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    from PIL import Image
 
-    dataset = Faces("cats", "train")
+    faces = Faces("faces", "train")
+    print("Loaded faces")
+    cats = Cats("cats", "train")
+    print("Loaded cats")
 
-    img, keypoints, size = dataset[np.random.randint(len(dataset))]
+    merged = MergedDataset(faces, cats)
+    while True:
+        img, keypoints, size = merged[np.random.randint(len(merged))]
 
-    fig = plt.figure()
-    plt.scatter(keypoints[0, 0:2]*128, keypoints[1, 0:2]*128, c='r')
-    plt.scatter(keypoints[0, 2:]*128, keypoints[1, 2:]*128)
+        fig = plt.figure()
+        plt.scatter(keypoints[0, :]*128, keypoints[1, :]*128, c='r')
 
-    plt.imshow(np.transpose(img, (1, 2, 0)))
-    plt.show()
+        plt.imshow(np.transpose(img, (1, 2, 0)))
+        plt.show()
+

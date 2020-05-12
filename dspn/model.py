@@ -24,8 +24,14 @@ def build_net(args):
     elif args.dataset == "cats":
         set_channels = 2
         set_size = 10
+    elif args.dataset == "faces":
+        set_channels = 2
+        set_size = 10
+    elif args.dataset == "merged":
+        set_channels = 2
+        set_size = 10
 
-    use_convolution = args.dataset in ["clevr-box", "clevr-state", "cats"]
+    use_convolution = args.dataset in ["clevr-box", "clevr-state", "cats", "faces", "merged"]
     hidden_dim = args.dim
     inner_lr = args.inner_lr
     iters = args.iters
@@ -119,7 +125,6 @@ class ConvEncoder(nn.Module):
         x = self.layers(x)
         x = self.end(x)
         return x.view(x.size(0), -1)
-
 
 class FSEncoder(nn.Module):
     def __init__(self, input_channels, output_channels, dim):

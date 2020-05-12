@@ -61,7 +61,7 @@ def main():
     )
     parser.add_argument(
         "--dataset",
-        choices=["mnist", "clevr-box", "clevr-state", "cats"],
+        choices=["mnist", "clevr-box", "clevr-state", "cats", "faces", "merged"],
         help="Which dataset to use",
     )
     parser.add_argument(
@@ -127,7 +127,7 @@ def main():
     )
     parser.add_argument(
         "--loss",
-        choices=["hungarian", "chamfer"],
+        choices=["hungarian", "chamfer", "emd"],
         default="hungarian",
         help="Type of loss used",
     )
@@ -174,31 +174,45 @@ def main():
         dataset_train = data.MNISTSet(train=True, full=args.full_eval)
         dataset_test = data.MNISTSet(train=False, full=args.full_eval)
     elif args.dataset in ["clevr-box", "clevr-state"]:
-        dataset_train = data.CLEVR(
-            "clevr", "train", box=args.dataset == "clevr-box", full=args.full_eval
-        )
-        dataset_test = data.CLEVR(
-            "clevr", "val", box=args.dataset == "clevr-box", full=args.full_eval
-        )
+        dataset_train = data.CLEVR("clevr", 
+                                   "train", 
+                                   box=args.dataset == "clevr-box", 
+                                   full=args.full_eval)
+
+        dataset_test = data.CLEVR("clevr", 
+                                  "val", 
+                                  box=args.dataset == "clevr-box", 
+                                  full=args.full_eval)
     elif args.dataset == "cats":
-        dataset_train = data.Faces(
-            "cats", "train", full=args.full_eval
-        )
-        dataset_test = data.Faces(
-            "cats", "val", full=args.full_eval
-        )
+        dataset_train = data.Cats("cats", "train", full=args.full_eval)
+        dataset_test = data.Cats("cats", "val", full=args.full_eval)
+    elif args.dataset == "faces":
+        dataset_train = data.Faces("faces", "train", full=args.full_eval)
+        dataset_test = data.Faces("faces", "val", full=args.full_eval)
+    elif args.dataset == "merged":
+        # merged cats and human faces
+        dataset_train_cats = data.Cats("cats", "train", full=args.full_eval)
+        dataset_train_faces = data.Faces("faces", "train", full=args.full_eval)
+
+        dataset_test_cats = data.Cats("cats", "val", full=args.full_eval)
+        dataset_test_faces = data.Faces("faces", "val", full=args.full_eval)
+
+        dataset_train = data.MergedDataset(dataset_train_cats,
+                                           dataset_train_faces)
+
+        dataset_test = data.MergedDataset(dataset_test_cats,
+                                          dataset_test_faces)
 
     if not args.eval_only:
-        train_loader = data.get_loader(
-            dataset_train, batch_size=args.batch_size, num_workers=args.num_workers
-        )
+        train_loader = data.get_loader(dataset_train, 
+                                       batch_size=args.batch_size, 
+                                       num_workers=args.num_workers)
+
     if not args.train_only:
-        test_loader = data.get_loader(
-            dataset_test,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            shuffle=False,
-        )
+        test_loader = data.get_loader(dataset_test,
+                                      batch_size=args.batch_size,
+                                      num_workers=args.num_workers,
+                                      shuffle=False)
 
     tracker = track.Tracker(
         train_mae=track.ExpMean(),
@@ -240,6 +254,7 @@ def main():
             ncols=0,
             desc="{1} E{0:02d}".format(epoch, "train" if train else "test "),
         )
+
         for i, sample in enumerate(loader, start=epoch * iters_per_epoch):
             # input is either a set or an image
             input, target_set, target_mask = map(lambda x: x.cuda(), sample)
@@ -267,7 +282,8 @@ def main():
                 set_loss = utils.chamfer_loss(
                     torch.stack(progress), target_set.unsqueeze(0)
                 )
-            else:
+
+            elif args.loss == "hungarian":
                 # dim 0 is over the inner iteration steps
                 a = torch.stack(progress)
                 # target set is explicitly broadcasted over dim 0
@@ -277,15 +293,20 @@ def main():
                 b = b.view(-1, b.size(2), b.size(3))
                 set_loss = utils.hungarian_loss(
                     progress[-1], target_set, thread_pool=pool
-                ).unsqueeze(0)
-            # Only use representation loss with DSPN and when doing general supervised prediction, not when auto-encoding
+                ).unsqueeze(0)                
+            elif args.loss == "emd":
+                set_loss = utils.emd(progress[-1], target_set).unsqueeze(0)
+
+            # Only use representation loss with DSPN and when doing general
+            # supervised prediction, not when auto-encoding
             if args.supervised and not args.baseline:
                 repr_loss = args.huber_repr * F.smooth_l1_loss(y_enc, y_label)
                 loss = set_loss.mean() + repr_loss.mean()
             else:
                 loss = set_loss.mean()
 
-            # restore progress variable to not contain masks for correct exporting
+            # restore progress variable to not contain masks for correct
+            # exporting
             progress = progress_only
 
             # Outer optim step
@@ -295,30 +316,34 @@ def main():
                 optimizer.step()
 
             # Tensorboard tracking of metrics for debugging
-            tracked_last = tracker.update("{}_last".format(prefix), set_loss[-1].item())
-            tracked_loss = tracker.update("{}_loss".format(prefix), loss.item())
+            tracked_last = tracker.update(f"{prefix}_last", 
+                                          set_loss[-1].item())
+            tracked_loss = tracker.update(f"{prefix}_loss", loss.item())
             if train:
-                writer.add_scalar("metric/set-loss", loss.item(), global_step=i)
-                writer.add_scalar(
-                    "metric/set-last", set_loss[-1].mean().item(), global_step=i
-                )
+                writer.add_scalar("metric/set-loss", 
+                                  loss.item(), 
+                                  global_step=i)
+
+                writer.add_scalar("metric/set-last", 
+                                  set_loss[-1].mean().item(), 
+                                  global_step=i)
+
                 if not args.baseline:
-                    writer.add_scalar(
-                        "metric/eval-first", evals[0].mean().item(), global_step=i
-                    )
-                    writer.add_scalar(
-                        "metric/eval-last", evals[-1].mean().item(), global_step=i
-                    )
-                    writer.add_scalar(
-                        "metric/max-inner-grad-norm",
-                        max(g.item() for g in gradn),
-                        global_step=i,
-                    )
-                    writer.add_scalar(
-                        "metric/mean-inner-grad-norm",
-                        sum(g.item() for g in gradn) / len(gradn),
-                        global_step=i,
-                    )
+                    writer.add_scalar("metric/eval-first",
+                                      evals[0].mean().item(), 
+                                      global_step=i)
+
+                    writer.add_scalar("metric/eval-last", 
+                                      evals[-1].mean().item(), global_step=i)
+
+                    writer.add_scalar("metric/max-inner-grad-norm",
+                                      max(g.item() for g in gradn),
+                                      global_step=i,)
+
+                    writer.add_scalar("metric/mean-inner-grad-norm",
+                                      sum(g.item() for g in gradn)/len(gradn),
+                                      global_step=i,)
+
                     if args.supervised:
                         writer.add_scalar(
                             "metric/repr_loss", repr_loss.item(), global_step=i
@@ -342,9 +367,10 @@ def main():
                     progress_steps = []
                     for pro, mas in zip(progress, masks):
                         # pro and mas are one step of the inner optim
-                        # score boxes contains the list of predicted elements for one step
+                        # score boxes contains the list of predicted elements
+                        # for one step
                         score_boxes = []
-                        for p, m in zip(pro.cpu().detach(), mas.cpu().detach()):
+                        for p, m in zip(pro.cpu().detach(),mas.cpu().detach()):
                             score_box = torch.cat([m.unsqueeze(0), p], dim=0)
                             score_boxes.append(score_box)
                         progress_steps.append(score_boxes)
@@ -368,12 +394,19 @@ def main():
                 for j, (s, ms) in enumerate(zip(progress, masks)):
                     if args.dataset == "clevr-state":
                         continue
+
+                    if args.dataset.startswith("clevr"):
+                        threshold = 0.5
+                    else:
+                        threshold = None
+
                     s, ms = utils.scatter_masked(
                         s,
                         ms,
                         binned=args.dataset.startswith("clevr"),
-                        threshold=0.5 if args.dataset.startswith("clevr") else None,
+                        threshold=threshold
                     )
+
                     if j != len(progress) - 1:
                         tag_name = f"{name}"
                     else:
@@ -384,7 +417,7 @@ def main():
                         writer.add_image_with_boxes(
                             tag_name, img, s.transpose(0, 1), global_step=j
                         )
-                    elif args.dataset == "cats":
+                    elif args.dataset == "cats" or args.dataset == "faces" or args.dataset == "merged":
                         img = input[0].detach().cpu()
 
                         fig = plt.figure()
@@ -414,7 +447,7 @@ def main():
             os.makedirs(f"{args.export_dir}/groundtruths", exist_ok=True)
             os.makedirs(f"{args.export_dir}/detections", exist_ok=True)
             for i, (gt, dets) in enumerate(zip(true_export, pred_export)):
-                with open(f"{args.export_dir}/groundtruths/{i}.txt", "w") as fd:
+                with open(f"{args.export_dir}/groundtruths/{i}.txt","w") as fd:
                     for box in gt.transpose(0, 1):
                         if (box == 0).all():
                             continue
@@ -460,12 +493,23 @@ def main():
             "args": vars(args),
             "hash": git_hash,
         }
+
         torch.save(results, os.path.join("logs", name))
         if args.eval_only:
             break
 
-    took = start-time.time()
-    print(f"Process took {took} seconds, avg {took/args.epochs} s/epoch.")
+    took = time.time() - start
+    print(f"Process took {took:.1f}s, avg {took/args.epochs:.1f} s/epoch.")
+
+    # save hyper parameters to tensorboard for reference
+    hparams = {k: v for k, v in vars(args).items() if v != None}
+    metrics = {
+        "mean_train_loss": np.mean(tracker.data["train_last"]),
+        "mean_test_loss": np.mean(tracker.data["test_loss"]),
+        "total_time": took,
+        "avg_time_per_epoch": took/args.epochs
+    }
+    train_writer.add_hparams(hparams, metric_dict=metrics, name="hparams")
 
 
 if __name__ == "__main__":
