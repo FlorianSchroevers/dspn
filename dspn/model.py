@@ -1,10 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.nn.init as init
 import torchvision
-import matplotlib.pyplot as plt
-import numpy as np
 
 from fspool import FSPool
 from dspn import DSPN
@@ -31,7 +28,10 @@ def build_net(args):
         set_channels = 2
         set_size = 10
 
-    use_convolution = args.dataset in ["clevr-box", "clevr-state", "cats", "faces", "merged"]
+    use_convolution = args.dataset in [
+        "clevr-box", "clevr-state", "cats", "faces", "merged"
+    ]
+
     hidden_dim = args.dim
     inner_lr = args.inner_lr
     iters = args.iters
@@ -46,7 +46,8 @@ def build_net(args):
             set_encoder, set_channels, set_size, hidden_dim, iters, inner_lr
         )
     else:
-        # the set_channels + 1 is for the additional mask feature that has to be predicted
+        # the set_channels + 1 is for the additional mask feature that has to
+        # be predicted
         set_decoder = set_decoder_class(
             latent_dim, set_channels + 1, set_size, hidden_dim
         )
@@ -57,16 +58,19 @@ def build_net(args):
         input_encoder = None
 
     net = Net(
-        input_encoder=input_encoder, set_encoder=set_encoder, set_decoder=set_decoder
+        input_encoder=input_encoder,
+        set_encoder=set_encoder,
+        set_decoder=set_decoder
     )
+
     return net
 
 
 class Net(nn.Module):
     def __init__(self, set_encoder, set_decoder, input_encoder=None):
         """
-        In the auto-encoder setting, don't pass an input_encoder because the target set and mask is
-        assumed to be the input.
+        In the auto-encoder setting, don't pass an input_encoder because the
+        target set and mask is assumed to be the input.
         In the general prediction setting, must pass all three.
         """
         super().__init__()
@@ -86,13 +90,15 @@ class Net(nn.Module):
 
     def forward(self, input, target_set, target_mask):
         if self.input_encoder is None:
-            # auto-encoder, ignore input and use target set and mask as input instead
+            # auto-encoder, ignore input and use target set and mask as input
+            # instead
             latent_repr = self.set_encoder(target_set, target_mask)
             target_repr = latent_repr
         else:
             # set prediction, use proper input_encoder
             latent_repr = self.input_encoder(input)
-            # note that target repr is only used for loss computation in training
+            # note that target repr is only used for loss computation in
+            # training
             # during inference, knowledge about the target is not needed
             target_repr = self.set_encoder(target_set, target_mask)
 
@@ -126,6 +132,7 @@ class ConvEncoder(nn.Module):
         x = self.end(x)
         return x.view(x.size(0), -1)
 
+
 class FSEncoder(nn.Module):
     def __init__(self, input_channels, output_channels, dim):
         super().__init__()
@@ -142,13 +149,18 @@ class FSEncoder(nn.Module):
         mask = mask.unsqueeze(1)
         x = torch.cat([x, mask], dim=1)  # include mask as part of set
         x = self.conv(x)
-        x = x / x.size(2)  # normalise so that activations aren't too high with big sets
+
+        # normalise so that activations aren't too high with big sets
+        x = x / x.size(2)
         x, _ = self.pool(x)
         return x
 
 
 class FSEncoderSized(nn.Module):
-    """ FSEncoder, but one feature in representation is forced to contain info about sum of masks """
+    """
+    FSEncoder, but one feature in representation is forced to contain info
+    about sum of masks
+    """
 
     def __init__(self, input_channels, output_channels, dim):
         super().__init__()
@@ -165,9 +177,12 @@ class FSEncoderSized(nn.Module):
         mask = mask.unsqueeze(1)
 
         x = self.conv(x)
-        x = x / x.size(2)  # normalise so that activations aren't too high with big sets
+
+        # normalise so that activations aren't too high with big sets
+        x = x / x.size(2)
         x = x * mask  # mask invalid elements away
         x, _ = self.pool(x)
+
         # include mask information in representation
         x = torch.cat([x, mask.mean(dim=2) * 4], dim=1)
         return x
@@ -248,9 +263,13 @@ class RNNDecoder(nn.Module):
         cell = x.view(x.size(0), -1)
         cell = self.lin(cell)
         # zero input of size set_size to get set_size number of outputs
-        dummy_input = torch.zeros(self.set_size, cell.size(0), 1, device=cell.device)
+        dummy_input = torch.zeros(
+            self.set_size, cell.size(0), 1, device=cell.device
+        )
         # initial hidden state of zeros
-        dummy_hidden = torch.zeros(1, cell.size(0), self.dim, device=cell.device)
+        dummy_hidden = torch.zeros(
+            1, cell.size(0), self.dim, device=cell.device
+        )
         # run the LSTM
         cell = cell.unsqueeze(0)
         output, _ = self.model(dummy_input, (dummy_hidden, cell))

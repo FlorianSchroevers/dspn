@@ -3,13 +3,16 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import numpy as np
+import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument("n", nargs="*")
 args = parser.parse_args()
 
 matplotlib.rc("text", usetex=True)
-params = {"text.latex.preamble": [r"\usepackage{bm,amsmath,mathtools,amssymb}"]}
+params = {
+    "text.latex.preamble": [r"\usepackage{bm,amsmath,mathtools,amssymb}"]
+}
 plt.rcParams.update(params)
 
 
@@ -31,15 +34,41 @@ plt.figure(figsize=(12, len(args.n)))
 for j, index in enumerate(args.n):
     progress = []
     for i in range(11):
-        points = list(load_file(f"out/mnist/dspn/detections/{index}-step{i}.txt"))
+        points_path = os.path.join(
+            "out",
+            "mnist",
+            "dspn",
+            "detections",
+            f"{index}-step{i}.txt"
+        )
+        points = list(load_file(points_path))
         progress.append(points)
-    progress.append(list(load_file(f"out/mnist/base/groundtruths/{index}.txt")))
-    progress.append(list(load_file(f"out/mnist/base/detections/{index}.txt")))
+
+    groundtruths_path = os.path.join(
+        "out",
+        "mnist",
+        "base",
+        "groundtruths",
+        f"{index}.txt"
+    )
+
+    progress.append(list(load_file(groundtruths_path)))
+
+    detections_path = os.path.join(
+        "out",
+        "mnist",
+        "base",
+        "detections",
+        f"{index}.txt"
+    )
+
+    progress.append(list(load_file(detections_path)))
 
     point_color = colors.to_rgb("#34495e")
     for i, step in enumerate(progress):
         plt.subplot(
-            len(args.n), len(progress), i + 1 + j * len(progress), aspect="equal"
+            len(args.n),
+            len(progress), i + 1 + j * len(progress), aspect="equal"
         )
         score, x, y = zip(*step)
         x, y = y, x

@@ -2,8 +2,6 @@ import argparse
 import itertools
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import matplotlib.colors as colors
 import numpy as np
 import os
 import data
@@ -16,7 +14,9 @@ parser.add_argument("--keep", type=int, nargs="*")
 args = parser.parse_args()
 
 matplotlib.rc("text", usetex=True)
-params = {"text.latex.preamble": [r"\usepackage{bm,amsmath,mathtools,amssymb}"]}
+params = {
+    "text.latex.preamble": [r"\usepackage{bm,amsmath,mathtools,amssymb}"]
+}
 plt.rcParams.update(params)
 
 base_path = "clevr/images/val"
@@ -24,10 +24,10 @@ val_images = sorted(os.listdir(base_path))
 
 
 def take(iterable, n):
-    l = []
+    li = []
     for _ in range(n):
-        l.append(next(iterable))
-    return l
+        li.append(next(iterable))
+    return li
 
 
 def load_file(path):
@@ -46,13 +46,15 @@ def load_file(path):
             color = np.argmax(take(tokens, 8))
             shape = np.argmax(take(tokens, 3))
             size = np.argmax(take(tokens, 2))
-            access = lambda x, i: data.CLASSES[x][i]
+
             yield (
-                "({:.2f}, {:.2f}, {:.2f})".format(*map(lambda x: 3 * float(x), coord)),
-                access("size", size),
-                access("color", color),
-                access("material", material),
-                access("shape", shape),
+                "({:.2f}, {:.2f}, {:.2f})".format(
+                    *map(lambda x: 3 * float(x), coord)
+                ),
+                data.CLASSES["size"][size],
+                data.CLASSES["color"][color],
+                data.CLASSES["material"][material],
+                data.CLASSES["shape"][shape],
             )
 
 
@@ -63,14 +65,37 @@ indices_to_use.append(-1)
 plt.figure(figsize=(12, 4))
 for j, index in enumerate(args.n):
     progress = []
-    path = "out/clevr-state/{}-clevr-state-1-{}/{}/{}.txt"
+
     for i in range(31):
-        points = list(
-            load_file(path.format("dspn", "30", "detections", f"{index}-step{i}"))
+        points_path = os.path.join(
+            "out",
+            "clevr-state",
+            "dspn-clevr-state-1-30",
+            "detections",
+            f"{index}-step{i}.txt"
         )
+        points = list(load_file(points_path))
         progress.append(points)
-    progress.append(list(load_file(path.format("base", "10", "groundtruths", index))))
-    progress.append(list(load_file(path.format("base", "10", "detections", index))))
+
+    groundtruths_path = os.path.join(
+        "out",
+        "clevr-state",
+        "base-clevr-state-1-10",
+        "groundtruths",
+        f"{index}.txt"
+    )
+
+    progress.append(list(load_file(groundtruths_path)))
+
+    detections_path = os.path.join(
+        "out",
+        "clevr-state",
+        "base-clevr-state-1-10",
+        "detections",
+        f"{index}.txt"
+    )
+
+    progress.append(list(load_file(detections_path)))
 
     img = Image.open(os.path.join(base_path, val_images[int(index)]))
     img = img.resize((128, 128), Image.LANCZOS)
@@ -92,15 +117,16 @@ for j, index in enumerate(args.n):
             header = r"$\hat{\bm{Y}}^{(" + str(progress_n) + ")}$"
         column.append(header)
         for object in sorted(
-            step, key=lambda x: [float(x.strip()) for x in x[0][1:-1].split(",")]
+            step, key=lambda x: [
+                float(x.strip()) for x in x[0][1:-1].split(",")
+            ]
         ):
             column.append(object[0])
             column.append(" ".join(object[1:]))
         matrix.append(column)
     # transpose
     matrix = itertools.zip_longest(*matrix, fillvalue="")
-    # mark mismatched entries
-    contains_words = lambda row: "small" in row[-2] or "large" in row[-2]
+
     # make an attribute red if it isn't correct
     matrix = [
         [
@@ -116,7 +142,7 @@ for j, index in enumerate(args.n):
             )
             for state in row
         ]
-        if contains_words(row)
+        if "small" in row[-2] or "large" in row[-2]
         else row
         for row in matrix
     ]
@@ -134,6 +160,8 @@ for j, index in enumerate(args.n):
 \end{{tabular}}
 """
     table = template.format(
-        j, "{" + "c" * len(indices_to_use) + "}", matrix[0], "\\\\\n".join(matrix[1:])
+        j, "{" + "c" * len(indices_to_use) + "}", matrix[0], "\\\\\n".join(
+            matrix[1:]
+        )
     )
     print(table)

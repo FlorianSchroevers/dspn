@@ -10,13 +10,18 @@ class DSPN(nn.Module):
     https://arxiv.org/abs/1906.06565
     """
 
-    def __init__(self, encoder, set_channels, max_set_size, channels, iters, lr):
+    def __init__(self, encoder, set_channels, max_set_size, channels, iters,
+                 lr):
         """
-        encoder: Set encoder module that takes a set as input and returns a representation thereof.
+        encoder: Set encoder module that takes a set as input and returns a
+        representation thereof.
             It should have a forward function that takes two arguments:
-            - a set: FloatTensor of size (batch_size, input_channels, maximum_set_size). Each set
-            should be padded to the same maximum size with 0s, even across batches.
-            - a mask: FloatTensor of size (batch_size, maximum_set_size). This should take the value 1
+            - a set: FloatTensor of size (batch_size, input_channels,
+            maximum_set_size). Each set
+            should be padded to the same maximum size with 0s, even across
+            batches.
+            - a mask: FloatTensor of size (batch_size, maximum_set_size).
+            This should take the value 1
             if the corresponding element is present and 0 if not.
 
         channels: Number of channels of the set to predict.
@@ -33,17 +38,23 @@ class DSPN(nn.Module):
         self.lr = lr
         self.channels = channels
 
-        self.starting_set = nn.Parameter(torch.rand(1, set_channels, max_set_size))
+        self.starting_set = nn.Parameter(
+            torch.rand(1, set_channels, max_set_size)
+        )
         self.starting_mask = nn.Parameter(0.5 * torch.ones(1, max_set_size))
 
     def forward(self, target_repr):
         """
-        Conceptually, DSPN simply turns the target_repr feature vector into a set.
+        Conceptually, DSPN simply turns the target_repr feature vector into a
+        set.
 
-        target_repr: Representation that the predicted set should match. FloatTensor of size (batch_size, repr_channels).
+        target_repr: Representation that the predicted set should match.
+        FloatTensor of size (batch_size, repr_channels).
         Note that repr_channels can be different from self.channels.
-        This can come from a set processed with the same encoder as self.encoder (auto-encoder), or a different
-        input completely (normal supervised learning), such as an image encoded into a feature vector.
+        This can come from a set processed with the same encoder as
+        self.encoder (auto-encoder), or a different
+        input completely (normal supervised learning), such as an image
+        encoded into a feature vector.
         """
         # copy same initial set over batch
         current_set = self.starting_set.expand(
@@ -64,7 +75,8 @@ class DSPN(nn.Module):
 
         # optimise repr_loss for fixed number of steps
         for i in range(self.iters):
-            # regardless of grad setting in train or eval, each iteration requires torch.autograd.grad to be used
+            # regardless of grad setting in train or eval, each iteration
+            # requires torch.autograd.grad to be used
             with torch.enable_grad():
                 if not self.training:
                     current_set.requires_grad = True

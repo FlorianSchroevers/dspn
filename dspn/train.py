@@ -5,25 +5,21 @@ import time
 
 import torch
 import torch.nn.functional as F
-
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import torch.multiprocessing as mp
 
-import scipy.optimize
 import numpy as np
 from tqdm import tqdm
 import matplotlib
 import matplotlib.pyplot as plt
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from tensorboardX import SummaryWriter
 
 import data
 import track
 import model
 import utils
+
+matplotlib.use("Agg")
 
 
 def main():
@@ -57,11 +53,16 @@ def main():
         "--batch-size", type=int, default=32, help="Batch size to train with"
     )
     parser.add_argument(
-        "--num-workers", type=int, default=4, help="Number of threads for data loader"
+        "--num-workers",
+        type=int,
+        default=0,
+        help="Number of threads for data loader"
     )
     parser.add_argument(
         "--dataset",
-        choices=["mnist", "clevr-box", "clevr-state", "cats", "faces", "merged"],
+        choices=[
+            "mnist", "clevr-box", "clevr-state", "cats", "faces", "merged"
+        ],
         help="Which dataset to use",
     )
     parser.add_argument(
@@ -70,26 +71,52 @@ def main():
         help="Run on CPU instead of GPU (not recommended)",
     )
     parser.add_argument(
-        "--train-only", action="store_true", help="Only run training, no evaluation"
+        "--train-only",
+        action="store_true",
+        help="Only run training, no evaluation"
     )
     parser.add_argument(
-        "--eval-only", action="store_true", help="Only run evaluation, no training"
+        "--eval-only",
+        action="store_true",
+        help="Only run evaluation, no training"
     )
-    parser.add_argument("--multi-gpu", action="store_true", help="Use multiple GPUs")
     parser.add_argument(
-        "--show", action="store_true", help="Plot generated samples in Tensorboard"
+        "--multi-gpu",
+        action="store_true",
+        help="Use multiple GPUs"
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Plot generated samples in Tensorboard"
+    )
+    parser.add_argument(
+        "--show-skip",
+        type=int,
+        default=1,
+        help="Number of epochs to skip before exporting to Tensorboard"
     )
 
     parser.add_argument(
-        "--infer-name", action="store_true", help="Automatically name run based on dataset/run number"
+        "--infer-name",
+        action="store_true",
+        help="Automatically name run based on dataset/run number"
     )
 
     parser.add_argument("--supervised", action="store_true", help="")
-    parser.add_argument("--baseline", action="store_true", help="Use baseline model")
-
-    parser.add_argument("--export-dir", type=str, help="Directory to output samples to")
     parser.add_argument(
-        "--export-n", type=int, default=10 ** 9, help="How many samples to output"
+        "--baseline",
+        action="store_true",
+        help="Use baseline model"
+    )
+
+    parser.add_argument(
+        "--export-dir", type=str, help="Directory to output samples to")
+    parser.add_argument(
+        "--export-n",
+        type=int,
+        default=10 ** 9,
+        help="How many samples to output"
     )
     parser.add_argument(
         "--export-progress",
@@ -123,17 +150,15 @@ def main():
         "--huber-repr",
         type=float,
         default=1,
-        help="Scaling of representation loss term for DSPN supervised learning",
+        help="Scaling of repr loss term for DSPN supervised learning",
     )
     parser.add_argument(
         "--loss",
         choices=["hungarian", "chamfer", "emd"],
-        default="hungarian",
+        default="emd",
         help="Type of loss used",
     )
     args = parser.parse_args()
-
-
 
     if args.infer_name:
         if args.baseline:
@@ -142,7 +167,11 @@ def main():
             prefix = "dspn"
 
         used_nums = []
-        runs = os.listdir("runs/")
+
+        if not os.path.exists("runs"):
+            os.makedirs("runs")
+
+        runs = os.listdir("runs")
         for run in runs:
             if args.dataset in run:
                 used_nums.append(int(run.split("-")[-1]))
@@ -174,15 +203,19 @@ def main():
         dataset_train = data.MNISTSet(train=True, full=args.full_eval)
         dataset_test = data.MNISTSet(train=False, full=args.full_eval)
     elif args.dataset in ["clevr-box", "clevr-state"]:
-        dataset_train = data.CLEVR("clevr", 
-                                   "train", 
-                                   box=args.dataset == "clevr-box", 
-                                   full=args.full_eval)
+        dataset_train = data.CLEVR(
+            "clevr",
+            "train",
+            box=args.dataset == "clevr-box",
+            full=args.full_eval
+        )
 
-        dataset_test = data.CLEVR("clevr", 
-                                  "val", 
-                                  box=args.dataset == "clevr-box", 
-                                  full=args.full_eval)
+        dataset_test = data.CLEVR(
+            "clevr",
+            "val",
+            box=args.dataset == "clevr-box",
+            full=args.full_eval
+        )
     elif args.dataset == "cats":
         dataset_train = data.Cats("cats", "train", full=args.full_eval)
         dataset_test = data.Cats("cats", "val", full=args.full_eval)
@@ -197,22 +230,30 @@ def main():
         dataset_test_cats = data.Cats("cats", "val", full=args.full_eval)
         dataset_test_faces = data.Faces("faces", "val", full=args.full_eval)
 
-        dataset_train = data.MergedDataset(dataset_train_cats,
-                                           dataset_train_faces)
+        dataset_train = data.MergedDataset(
+            dataset_train_cats,
+            dataset_train_faces
+        )
 
-        dataset_test = data.MergedDataset(dataset_test_cats,
-                                          dataset_test_faces)
+        dataset_test = data.MergedDataset(
+            dataset_test_cats,
+            dataset_test_faces
+        )
 
     if not args.eval_only:
-        train_loader = data.get_loader(dataset_train, 
-                                       batch_size=args.batch_size, 
-                                       num_workers=args.num_workers)
+        train_loader = data.get_loader(
+            dataset_train,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers
+        )
 
     if not args.train_only:
-        test_loader = data.get_loader(dataset_test,
-                                      batch_size=args.batch_size,
-                                      num_workers=args.num_workers,
-                                      shuffle=False)
+        test_loader = data.get_loader(
+            dataset_test,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            shuffle=False
+        )
 
     tracker = track.Tracker(
         train_mae=track.ExpMean(),
@@ -222,7 +263,6 @@ def main():
         test_last=track.Mean(),
         test_loss=track.Mean(),
     )
-
 
     if args.resume:
         log = torch.load(args.resume)
@@ -243,7 +283,6 @@ def main():
             prefix = "test"
             torch.set_grad_enabled(False)
 
-        total_train_steps = args.epochs * len(loader)
         if args.export_dir:
             true_export = []
             pred_export = []
@@ -284,16 +323,9 @@ def main():
                 )
 
             elif args.loss == "hungarian":
-                # dim 0 is over the inner iteration steps
-                a = torch.stack(progress)
-                # target set is explicitly broadcasted over dim 0
-                b = target_set.repeat(a.size(0), 1, 1, 1)
-                # flatten inner iteration dim and batch dim
-                a = a.view(-1, a.size(2), a.size(3))
-                b = b.view(-1, b.size(2), b.size(3))
                 set_loss = utils.hungarian_loss(
                     progress[-1], target_set, thread_pool=pool
-                ).unsqueeze(0)                
+                ).unsqueeze(0)
             elif args.loss == "emd":
                 set_loss = utils.emd(progress[-1], target_set).unsqueeze(0)
 
@@ -316,37 +348,53 @@ def main():
                 optimizer.step()
 
             # Tensorboard tracking of metrics for debugging
-            tracked_last = tracker.update(f"{prefix}_last", 
-                                          set_loss[-1].item())
+            tracked_last = tracker.update(
+                f"{prefix}_last", set_loss[-1].item()
+            )
             tracked_loss = tracker.update(f"{prefix}_loss", loss.item())
             if train:
-                writer.add_scalar("metric/set-loss", 
-                                  loss.item(), 
-                                  global_step=i)
+                writer.add_scalar(
+                    "metric/set-loss",
+                    loss.item(),
+                    global_step=i
+                )
 
-                writer.add_scalar("metric/set-last", 
-                                  set_loss[-1].mean().item(), 
-                                  global_step=i)
+                writer.add_scalar(
+                    "metric/set-last",
+                    set_loss[-1].mean().item(),
+                    global_step=i
+                )
 
                 if not args.baseline:
-                    writer.add_scalar("metric/eval-first",
-                                      evals[0].mean().item(), 
-                                      global_step=i)
+                    writer.add_scalar(
+                        "metric/eval-first",
+                        evals[0].mean().item(),
+                        global_step=i
+                    )
 
-                    writer.add_scalar("metric/eval-last", 
-                                      evals[-1].mean().item(), global_step=i)
+                    writer.add_scalar(
+                        "metric/eval-last",
+                        evals[-1].mean().item(),
+                        global_step=i
+                    )
 
-                    writer.add_scalar("metric/max-inner-grad-norm",
-                                      max(g.item() for g in gradn),
-                                      global_step=i,)
+                    writer.add_scalar(
+                        "metric/max-inner-grad-norm",
+                        max(g.item() for g in gradn),
+                        global_step=i
+                    )
 
-                    writer.add_scalar("metric/mean-inner-grad-norm",
-                                      sum(g.item() for g in gradn)/len(gradn),
-                                      global_step=i,)
+                    writer.add_scalar(
+                        "metric/mean-inner-grad-norm",
+                        sum(g.item() for g in gradn)/len(gradn),
+                        global_step=i
+                    )
 
                     if args.supervised:
                         writer.add_scalar(
-                            "metric/repr_loss", repr_loss.item(), global_step=i
+                            "metric/repr_loss",
+                            repr_loss.item(),
+                            global_step=i
                         )
 
             # Print current progress to progress bar
@@ -356,7 +404,7 @@ def main():
                 loss=fmt(tracked_loss),
                 bad=fmt(evals[-1].detach().cpu().item() * 1000)
                 if not args.baseline
-                else 0,
+                else 0
             )
 
             # Store predictions to be exported
@@ -365,12 +413,12 @@ def main():
                     for p, m in zip(target_set, target_mask):
                         true_export.append(p.detach().cpu())
                     progress_steps = []
-                    for pro, mas in zip(progress, masks):
-                        # pro and mas are one step of the inner optim
+                    for pro, ms in zip(progress, masks):
+                        # pro and ms are one step of the inner optim
                         # score boxes contains the list of predicted elements
                         # for one step
                         score_boxes = []
-                        for p, m in zip(pro.cpu().detach(),mas.cpu().detach()):
+                        for p, m in zip(pro.cpu().detach(), ms.cpu().detach()):
                             score_box = torch.cat([m.unsqueeze(0), p], dim=0)
                             score_boxes.append(score_box)
                         progress_steps.append(score_boxes)
@@ -378,7 +426,7 @@ def main():
                         pred_export.append(b)
 
             # Plot predictions in Tensorboard
-            if args.show and not train:
+            if args.show and epoch % args.show_skip == 0 and not train:
                 name = f"set/epoch-{epoch}/img-{i}"
                 # thresholded set
                 progress.append(progress[-1])
@@ -414,10 +462,16 @@ def main():
 
                     if args.dataset == "clevr-box":
                         img = input[0].detach().cpu()
+
                         writer.add_image_with_boxes(
-                            tag_name, img, s.transpose(0, 1), global_step=j
+                            tag_name,
+                            img,
+                            s.transpose(0, 1),
+                            global_step=j
                         )
-                    elif args.dataset == "cats" or args.dataset == "faces" or args.dataset == "merged":
+                    elif args.dataset == "cats" \
+                            or args.dataset == "faces" \
+                            or args.dataset == "merged":
                         img = input[0].detach().cpu()
 
                         fig = plt.figure()
@@ -425,9 +479,7 @@ def main():
 
                         plt.imshow(np.transpose(img, (1, 2, 0)))
 
-                        writer.add_figure(
-                            tag_name, fig, global_step=j
-                        )
+                        writer.add_figure(tag_name, fig, global_step=j)
                     else:  # mnist
                         fig = plt.figure()
                         y, x = s
@@ -447,54 +499,102 @@ def main():
             os.makedirs(f"{args.export_dir}/groundtruths", exist_ok=True)
             os.makedirs(f"{args.export_dir}/detections", exist_ok=True)
             for i, (gt, dets) in enumerate(zip(true_export, pred_export)):
-                with open(f"{args.export_dir}/groundtruths/{i}.txt","w") as fd:
+                export_groundtruths_path = os.path.join(
+                    args.export_dir,
+                    "groundtruths",
+                    f"{i}.txt"
+                )
+
+                with open(export_groundtruths_path, "w") as fd:
                     for box in gt.transpose(0, 1):
                         if (box == 0).all():
                             continue
                         s = "box " + " ".join(map(str, box.tolist()))
                         fd.write(s + "\n")
+
                 if args.export_progress:
                     for step, det in enumerate(dets):
-                        with open(
-                            f"{args.export_dir}/detections/{i}-step{step}.txt", "w"
-                        ) as fd:
+                        export_progress_path = os.path.join(
+                            args.export_dir,
+                            "detections",
+                            f"{i}-step{step}.txt"
+                        )
+
+                        with open(export_progress_path, "w") as fd:
                             for sbox in det.transpose(0, 1):
                                 s = f"box " + " ".join(map(str, sbox.tolist()))
                                 fd.write(s + "\n")
-                with open(f"{args.export_dir}/detections/{i}.txt", "w") as fd:
+
+                export_path = os.path.join(
+                            args.export_dir,
+                            "detections",
+                            f"{i}.txt"
+                        )
+                with open(export_path, "w") as fd:
                     for sbox in dets[-1].transpose(0, 1):
                         s = f"box " + " ".join(map(str, sbox.tolist()))
                         fd.write(s + "\n")
 
     import subprocess
 
-    # git_hash = subprocess.check_output(["git", "rev-parse", "HEAD"])
-    git_hash = "483igtrfiuey46"
+    git_hash = subprocess.check_output(["git", "rev-parse", "HEAD"])
+    # git_hash = "483igtrfiuey46"
 
     torch.backends.cudnn.benchmark = True
 
     print("Running")
     start = time.time()
+    best_test_loss = float("inf")
+    best_train_loss = float("inf")
+    best_epoch = -1
+
+    best_train_set_loss = float("inf")
+    best_test_set_loss = float("inf")
 
     for epoch in range(args.epochs):
         tracker.new_epoch()
         with mp.Pool(10) as pool:
             if not args.eval_only:
-                run(net, train_loader, optimizer, train=True, epoch=epoch, pool=pool)
+                run(
+                    net,
+                    train_loader,
+                    optimizer,
+                    train=True,
+                    epoch=epoch,
+                    pool=pool
+                )
             if not args.train_only:
-                run(net, test_loader, optimizer, train=False, epoch=epoch, pool=pool)
+                run(
+                    net,
+                    test_loader,
+                    optimizer,
+                    train=False,
+                    epoch=epoch,
+                    pool=pool
+                )
 
-        results = {
-            "name": name,
-            "tracker": tracker.data,
-            "weights": net.state_dict()
-            if not args.multi_gpu
-            else net.module.state_dict(),
-            "args": vars(args),
-            "hash": git_hash,
-        }
+        epoch_test_loss = np.mean(tracker.data["test_loss"][-1])
+        if epoch_test_loss < best_test_loss:
+            # only save if the epoch has lower loss
+            best_test_loss = epoch_test_loss
+            best_train_loss = np.mean(tracker.data["train_loss"][-1])
 
-        torch.save(results, os.path.join("logs", name))
+            best_train_set_loss = np.mean(tracker.data["train_last"][-1])
+            best_test_set_loss = np.mean(tracker.data["test_last"][-1])
+
+            best_epoch = epoch
+
+            results = {
+                "name": name,
+                "tracker": tracker.data,
+                "weights": net.state_dict()
+                if not args.multi_gpu
+                else net.module.state_dict(),
+                "args": vars(args),
+                "hash": git_hash,
+            }
+
+            torch.save(results, os.path.join("logs", name))
         if args.eval_only:
             break
 
@@ -502,10 +602,13 @@ def main():
     print(f"Process took {took:.1f}s, avg {took/args.epochs:.1f} s/epoch.")
 
     # save hyper parameters to tensorboard for reference
-    hparams = {k: v for k, v in vars(args).items() if v != None}
+    hparams = {k: v for k, v in vars(args).items() if v is not None}
     metrics = {
-        "mean_train_loss": np.mean(tracker.data["train_last"]),
-        "mean_test_loss": np.mean(tracker.data["test_loss"]),
+        "mean_train_loss": best_train_loss,
+        "mean_test_loss": best_test_loss,
+        "best_train_set_loss": best_train_set_loss,
+        "best_test_set_loss": best_test_set_loss,
+        "best_epoch": best_epoch,
         "total_time": took,
         "avg_time_per_epoch": took/args.epochs
     }
@@ -518,4 +621,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Process interrupted by user, emptying cache...")
         torch.cuda.empty_cache()
-

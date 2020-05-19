@@ -1,5 +1,8 @@
 class Tracker:
-    """ Track training statistics for different variables and view intermediate results through monitors. """
+    """
+    Track training statistics for different variables and view
+    intermediate results through monitors.
+    """
 
     def __init__(self, **monitors):
         self.monitors = monitors

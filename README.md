@@ -4,10 +4,10 @@
 
 ## DSPN
 
-This is the official implementation of our NeurIPS 2019 paper [Deep Set Prediction Networks][0].
-We propose a new way of predicting sets with a neural network that doesn't suffer from discontinuity issues.
+This is the unofficial adaptation of the implementation of the NeurIPS 2019 paper [Deep Set Prediction Networks][0].
+They propose a new way of predicting sets with a neural network that doesn't suffer from discontinuity issues.
 This is done by backpropagating through a set encoder to act as a set decoder.
-You can take a look at the [poster for NeurIPS 2019][4] or the [poster for the NeurIPS 2019 workshop on Sets & Partitions][5].
+You can take a look at the [poster for NeurIPS 2019][4] or the [poster for the NeurIPS 2019 workshop on Sets & Partitions][5]. This adaptation adds a new loss function, support for two new datasets, and the option to merge datasets.
 
 To use the decoder, you only need [`dspn.py`][1].
 You can see how it is used in [`model.py`][2] with `build_net` and the `Net` class.

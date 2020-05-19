@@ -1,17 +1,18 @@
 import scipy.optimize
 import torch
 import torch.nn.functional as F
-import torch.multiprocessing as mp
-import numpy as np
 import neuralnet_pytorch as nnt
+
 
 def hungarian_loss(predictions, targets, thread_pool):
     # predictions and targets shape :: (n, c, s)
     predictions, targets = outer(predictions, targets)
     # squared_error shape :: (n, s, s)
-    squared_error = F.smooth_l1_loss(predictions, 
-                                     targets.expand_as(predictions), 
-                                     reduction="none").mean(1)
+    squared_error = F.smooth_l1_loss(
+        predictions,
+        targets.expand_as(predictions),
+        reduction="none"
+    ).mean(1)
 
     squared_error_np = squared_error.detach().cpu().numpy()
     indices = thread_pool.map(hungarian_loss_per_sample, squared_error_np)
@@ -26,20 +27,26 @@ def hungarian_loss(predictions, targets, thread_pool):
 def hungarian_loss_per_sample(sample_np):
     return scipy.optimize.linear_sum_assignment(sample_np)
 
+
 def emd(predictions, targets):
     # predictions and targets shape :: (n, c, s)
     # proper input shape for emd_loss :: (n, s, c)
-    return nnt.metrics.emd_loss(torch.transpose(predictions, 1, 2), 
-                                torch.transpose(targets, 1, 2), 
-                                sinkhorn=False)
+    return nnt.metrics.emd_loss(
+        torch.transpose(predictions, 1, 2),
+        torch.transpose(targets, 1, 2),
+        sinkhorn=False
+    )
+
 
 def chamfer_loss(predictions, targets):
     # predictions and targets shape :: (k, n, c, s)
     predictions, targets = outer(predictions, targets)
     # squared_error shape :: (k, n, s, s)
-    squared_error = F.smooth_l1_loss(predictions, 
-                                     targets.expand_as(predictions), 
-                                     reduction="none").mean(2)
+    squared_error = F.smooth_l1_loss(
+        predictions,
+        targets.expand_as(predictions),
+        reduction="none"
+    ).mean(2)
     loss = squared_error.min(2)[0] + squared_error.min(3)[0]
     return loss.view(loss.size(0), -1).mean(1)
 
@@ -57,9 +64,10 @@ def scatter_masked(tensor, mask, binned=False, threshold=None):
         mask = mask[keep]
     return s, mask
 
+
 def outer(a, b=None):
-    """ 
-    Compute outer product between a and b (or a and a if b is not specified). 
+    """
+    Compute outer product between a and b (or a and a if b is not specified).
     """
     if b is None:
         b = a
@@ -69,10 +77,9 @@ def outer(a, b=None):
     b = b.unsqueeze(dim=-2).expand(*size_b)
     return a, b
 
+
 if __name__ == "__main__":
-    import neuralnet_pytorch as nnt
     cuda0 = torch.device('cuda:0')
 
     a = torch.Tensor().new_empty((2, 10, 3), device=cuda0)
     b = torch.Tensor().new_empty((2, 3, 3), device=cuda0)
-        
