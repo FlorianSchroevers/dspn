@@ -8,6 +8,8 @@ import torchvision.transforms as transforms
 import h5py
 import numpy as np
 
+import pandas as pd
+
 from PIL import Image
 
 
@@ -386,6 +388,67 @@ class Faces(ImageDataset):
 
         return targets
 
+class WFLW(torch.utils.data.Dataset):
+    def __init__(self, base_path, split, max_objects, full=False):
+        # super().__init__(base_path, split, 10, full)
+        self.base_path = base_path
+        self.split = split
+        self.max_objects = max_objects
+        self.full = full
+
+        target_ids = [96, 97, 54, 76, 82, 2, 30]
+        self.target_cols = []
+        
+        for target_id in target_ids:
+            for dim in ['x', 'y']:
+                self.target_cols.append(f"original_{target_id}_{dim}")
+
+
+        self.annotations = self.get_annotations()
+
+    def get_annotations(self):
+        return pd.read_csv(os.path.join(self.base_path, f"face_landmarks_wflw_{self.split}.csv"))
+
+    def __getitem__(self, item):
+        itemrow = self.annotations.iloc[item]
+        fname = itemrow["image_name"]
+        path = os.path.join(self.base_path, "images", fname)
+        img = Image.open(path).convert("RGB")
+        im_x, im_y = img.size
+
+        transform = transforms.Compose(
+            [transforms.Resize((128, 128)), transforms.ToTensor()]
+        )
+
+        img = transform(img)
+        
+        targets = itemrow[self.target_cols].values
+
+        targets = targets.reshape(-1, 2).T / [[im_x], [im_y]]
+        n_objects = targets.shape[1]
+
+        if n_objects > self.max_objects:
+            raise IndexError("Number of objects exceeds estimated"
+                             "max number of object")
+
+        # overlay objects on zero array holding up to max_objects
+        objects = np.zeros(shape=(2, self.max_objects))
+        objects[:, :n_objects] = targets
+
+        objects = torch.FloatTensor(objects)
+
+        # fill in masks
+        mask = torch.zeros(self.max_objects)
+        mask[:n_objects] = 1
+
+        return img, objects, mask
+
+    def __len__(self):
+        if self.split == "train" or self.full:
+            return self.annotations.shape[0]
+        else:
+            return self.annotations.shape[0] // 10
+
 
 class MergedDataset(torch.utils.data.Dataset):
     def __init__(self, *datasets):
@@ -412,19 +475,14 @@ class MergedDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     
-    cats = Cats("cats", "train")
-    print("Loaded cats")
+    ds = WFLW("wflw", "train", 7, True)
 
-    catloader = get_loader(cats, 16, num_workers=4, shuffle=False)
+    for i in np.random.randint(0, len(ds), 10):
+        img, targets, imshape = ds[i]
 
-    # print(cats.image_id_to_index.keys())
+        landmarks = targets[0] * 128
+        print(landmarks.shape)
 
-    # print(len(catloader))
-
-    for i in range(len(cats)):
-        if i in cats.image_id_to_index:
-            print(i)
-
-    # for obj in catloader:
-    #     print(obj)
-    
+        plt.scatter(landmarks[0, :], landmarks[1, :])
+        plt.imshow(img.transpose(0, 2).transpose(0, 1))
+        plt.show()

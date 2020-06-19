@@ -24,12 +24,15 @@ def build_net(args):
     elif args.dataset == "faces":
         set_channels = 2
         set_size = 10
+    elif args.dataset == "wflw":
+        set_channels = 2
+        set_size = 10
     elif args.dataset == "merged":
         set_channels = 2
         set_size = 10
 
     use_convolution = args.dataset in [
-        "clevr-box", "clevr-state", "cats", "faces", "merged"
+        "clevr-box", "clevr-state", "cats", "faces", "wflw", "merged"
     ]
 
     hidden_dim = args.dim

@@ -39,6 +39,7 @@ def emd(predictions, targets):
 
 
 def chamfer_loss(predictions, targets):
+    print(predictions.shape)
     # predictions and targets shape :: (k, n, c, s)
     predictions, targets = outer(predictions, targets)
     # squared_error shape :: (k, n, s, s)

@@ -61,7 +61,7 @@ def main():
     parser.add_argument(
         "--dataset",
         choices=[
-            "mnist", "clevr-box", "clevr-state", "cats", "faces", "merged"
+            "mnist", "clevr-box", "clevr-state", "cats", "faces", "merged", "wflw"
         ],
         help="Which dataset to use",
     )
@@ -217,18 +217,21 @@ def main():
             full=args.full_eval
         )
     elif args.dataset == "cats":
-        dataset_train = data.Cats("cats", "train", full=args.full_eval)
-        dataset_test = data.Cats("cats", "val", full=args.full_eval)
+        dataset_train = data.Cats("cats", "train", 9, full=args.full_eval)
+        dataset_test = data.Cats("cats", "val", 9, full=args.full_eval)
     elif args.dataset == "faces":
-        dataset_train = data.Faces("faces", "train", full=args.full_eval)
-        dataset_test = data.Faces("faces", "val", full=args.full_eval)
+        dataset_train = data.Faces("faces", "train", 4, full=args.full_eval)
+        dataset_test = data.Faces("faces", "val", 4, full=args.full_eval)
+    elif args.dataset == "wflw":
+        dataset_train = data.WFLW("wflw", "train", 7, full=args.full_eval)
+        dataset_test = data.WFLW("wflw", "test", 7, full=args.full_eval)
     elif args.dataset == "merged":
         # merged cats and human faces
         dataset_train_cats = data.Cats("cats", "train", full=args.full_eval)
-        dataset_train_faces = data.Faces("faces", "train", full=args.full_eval)
+        dataset_train_faces = data.WFLW("wflw", "train", full=args.full_eval)
 
         dataset_test_cats = data.Cats("cats", "val", full=args.full_eval)
-        dataset_test_faces = data.Faces("faces", "val", full=args.full_eval)
+        dataset_test_faces = data.WFLW("wflw", "val", full=args.full_eval)
 
         dataset_train = data.MergedDataset(
             dataset_train_cats,
@@ -471,6 +474,7 @@ def main():
                         )
                     elif args.dataset == "cats" \
                             or args.dataset == "faces" \
+                            or args.dataset == "wflw" \
                             or args.dataset == "merged":
                         img = input[0].detach().cpu()
 

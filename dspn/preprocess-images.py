@@ -24,6 +24,8 @@ class DatasetImages(torch.utils.data.Dataset):
             self.id_to_filename = self._find_images_cats()
         elif "faces" in path:
             self.id_to_filename = self._find_images_faces()
+        elif "wflw" in path:
+            self.id_to_filename = self._find_images_wflw()
 
         self.sorted_ids = sorted(
             self.id_to_filename.keys()
@@ -52,6 +54,19 @@ class DatasetImages(torch.utils.data.Dataset):
                 print("non_unique IDS found")
             id_to_filename[id] = filename
         return id_to_filename
+
+    def _find_images_wflw(self):
+        id_to_filename = {}
+        for filename in os.listdir(self.path):
+            if not filename.endswith(".jpg"):
+                continue
+            id = filename.split(".")[0]
+            id = int(id.replace("_", ""))
+            if id in id_to_filename:
+                print("non_unique IDS found")
+            id_to_filename[id] = filename
+        return id_to_filename
+
 
     def _find_images_faces(self):
         return {int(f.split('.')[0]): f for f in os.listdir(self.path) if f.endswith(".png")}
