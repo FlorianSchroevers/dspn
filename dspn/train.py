@@ -443,20 +443,6 @@ def main():
                         sample_preds += [0] * (len(m) * 2 - len(sample_preds))
                         predictions[fname] = sample_preds
 
-
-                        # input_img = input[batch_i].detach().cpu()
-                        # plt.scatter(p[0, :]*128, p[1, :]*128)
-                        # plt.imshow(np.transpose(input_img, (1, 2, 0)))
-                        # plt.show()
-
-                        # if len(fname) == 8:
-                        #     ds = "faces"
-                        # else:
-                        #     ds = "cats"
-                        # img = mpimg.imread(ds + '/images/val/' + fname)
-                        # plt.scatter(p[0, :]*img.shape[1], p[1, :]*img.shape[0])
-                        # plt.imshow(img)
-                        # plt.show()
                 # Store predictions to be exported
                 else:
                     if len(true_export) < args.export_n:
@@ -681,14 +667,17 @@ def main():
 
     if args.export_csv and args.export_dir:
 
-        cols = []
-        # get number of rows from any value, which is what this loop iterates over
-        for i in range(len(next(iter(predictions.values()))) // 2):
-            for l in ['x', 'y']:
-                cols.append(f"original_{i}_{l}")
+        if args.dataset == "wflw":
+            cols = dataset_test.target_cols
+        else:
+            cols = []
+            # get number of rows from any value, which is what this loop iterates over
+            for i in range(len(next(iter(predictions.values()))) // 2):
+                for l in ['x', 'y']:
+                    cols.append(f"original_{i}_{l}")
 
         pd.DataFrame.from_dict(predictions, orient="index", columns=cols).to_csv(
-            os.path.join(args.export_dir, 'predictions.csv'), 
+            os.path.join(args.export_dir, f'{args.name}-predictions.csv'), 
             sep=',', 
             index_label="image_name"
         )

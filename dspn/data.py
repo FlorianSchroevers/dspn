@@ -409,6 +409,17 @@ class WFLW(torch.utils.data.Dataset):
     def get_annotations(self):
         return pd.read_csv(os.path.join(self.base_path, f"face_landmarks_wflw_{self.split}.csv"))
 
+    def get_fname(self, item):
+        itemrow = self.annotations.iloc[item]
+        return itemrow["image_name"]
+
+    def get_imsize(self, item):
+        itemrow = self.annotations.iloc[item]
+        fname = itemrow["image_name"]
+        path = os.path.join(self.base_path, "images", fname)
+        img = Image.open(path).convert("RGB")
+        return img.size
+
     def __getitem__(self, item):
         itemrow = self.annotations.iloc[item]
         fname = itemrow["image_name"]
@@ -428,7 +439,7 @@ class WFLW(torch.utils.data.Dataset):
         n_objects = targets.shape[1]
 
         if n_objects > self.max_objects:
-            raise IndexError("Number of objects exceeds estimated"
+            raise IndexError("Number of objects exceeds estimated "
                              "max number of object")
 
         # overlay objects on zero array holding up to max_objects
@@ -473,25 +484,4 @@ class MergedDataset(torch.utils.data.Dataset):
 
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    
-    
-    wflw = WFLW("wflw", "train", 9, True)
-    cats = Cats("cats", "train", 9, True)
-
-    ds = MergedDataset(wflw, cats)
-
-    for i, (img, t, m) in enumerate(ds):
-        if not isinstance(img, np.ndarray):
-            print(i)
-            print(type(img))
-            break
-        # print([type(img), type(t), type(m)])
-        # img, targets, imshape = ds[i]
-
-        # landmarks = targets[0] * 128
-        # print(landmarks.shape)
-
-        # plt.scatter(landmarks[0, :], landmarks[1, :])
-        # plt.imshow(img.transpose(0, 2).transpose(0, 1))
-        # plt.show()
+    pass

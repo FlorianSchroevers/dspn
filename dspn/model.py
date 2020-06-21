@@ -20,13 +20,13 @@ def build_net(args):
         set_size = 10
     elif args.dataset == "cats":
         set_channels = 2
-        set_size = 10
+        set_size = 9
     elif args.dataset == "faces":
         set_channels = 2
         set_size = 10
     elif args.dataset == "wflw":
         set_channels = 2
-        set_size = 10
+        set_size = 7
     elif args.dataset == "merged":
         set_channels = 2
         set_size = 10
