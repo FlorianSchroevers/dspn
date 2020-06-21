@@ -127,7 +127,7 @@ class ImageDataset(torch.utils.data.Dataset):
         img_idx = self.image_id_to_index[img_id]
 
         targets, size = self.targets[img_idx]
-        image = self.image_db["images"][item]
+        image = torch.Tensor(self.image_db["images"][item])
         return image, targets, size
 
     def __len__(self):
@@ -261,8 +261,8 @@ class CLEVR(ImageDataset):
 
 
 class Cats(ImageDataset):
-    def __init__(self, base_path, split, full=False):
-        super().__init__(base_path, split, 10, full)
+    def __init__(self, base_path, split, max_objects, full=False):
+        super().__init__(base_path, split, max_objects, full)
 
         ids, self.targets = self.prepare_keypoints()
 
@@ -321,8 +321,8 @@ class Cats(ImageDataset):
 
 
 class Faces(ImageDataset):
-    def __init__(self, base_path, split, full=False):
-        super().__init__(base_path, split, 10, full)
+    def __init__(self, base_path, split, max_objects, full=False):
+        super().__init__(base_path, split, max_objects, full)
 
         self.targets = self.prepare_keypoints()
 
@@ -475,14 +475,23 @@ class MergedDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     
-    ds = WFLW("wflw", "train", 7, True)
+    
+    wflw = WFLW("wflw", "train", 9, True)
+    cats = Cats("cats", "train", 9, True)
 
-    for i in np.random.randint(0, len(ds), 10):
-        img, targets, imshape = ds[i]
+    ds = MergedDataset(wflw, cats)
 
-        landmarks = targets[0] * 128
-        print(landmarks.shape)
+    for i, (img, t, m) in enumerate(ds):
+        if not isinstance(img, np.ndarray):
+            print(i)
+            print(type(img))
+            break
+        # print([type(img), type(t), type(m)])
+        # img, targets, imshape = ds[i]
 
-        plt.scatter(landmarks[0, :], landmarks[1, :])
-        plt.imshow(img.transpose(0, 2).transpose(0, 1))
-        plt.show()
+        # landmarks = targets[0] * 128
+        # print(landmarks.shape)
+
+        # plt.scatter(landmarks[0, :], landmarks[1, :])
+        # plt.imshow(img.transpose(0, 2).transpose(0, 1))
+        # plt.show()

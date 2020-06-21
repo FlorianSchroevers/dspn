@@ -10,7 +10,10 @@ import torch.multiprocessing as mp
 import numpy as np
 from tqdm import tqdm
 import matplotlib
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+# import tkinter
+# matplotlib.use('TkAgg')
 
 from tensorboardX import SummaryWriter
 
@@ -19,8 +22,9 @@ import track
 import model
 import utils
 
-matplotlib.use("Agg")
+import pandas as pd
 
+matplotlib.use("Qt5Agg")
 
 def main():
     global net
@@ -50,7 +54,7 @@ def main():
         "--lr", type=float, default=1e-2, help="Outer learning rate of model"
     )
     parser.add_argument(
-        "--batch-size", type=int, default=32, help="Batch size to train with"
+        "--batch-size", type=int, default=12, help="Batch size to train with"
     )
     parser.add_argument(
         "--num-workers",
@@ -158,6 +162,12 @@ def main():
         default="emd",
         help="Type of loss used",
     )
+    parser.add_argument(
+        "--export-csv",
+        action="store_true",
+        help="Only perform predictions, don't evaluate in any way"
+    )
+
     args = parser.parse_args()
 
     if args.infer_name:
@@ -227,11 +237,11 @@ def main():
         dataset_test = data.WFLW("wflw", "test", 7, full=args.full_eval)
     elif args.dataset == "merged":
         # merged cats and human faces
-        dataset_train_cats = data.Cats("cats", "train", full=args.full_eval)
-        dataset_train_faces = data.WFLW("wflw", "train", full=args.full_eval)
+        dataset_train_cats = data.Cats("cats", "train", 9, full=args.full_eval)
+        dataset_train_faces = data.WFLW("wflw", "train", 9, full=args.full_eval)
 
-        dataset_test_cats = data.Cats("cats", "val", full=args.full_eval)
-        dataset_test_faces = data.WFLW("wflw", "val", full=args.full_eval)
+        dataset_test_cats = data.Cats("cats", "val", 9, full=args.full_eval)
+        dataset_test_faces = data.WFLW("wflw", "test", 9, full=args.full_eval)
 
         dataset_train = data.MergedDataset(
             dataset_train_cats,
@@ -274,6 +284,10 @@ def main():
         if args.multi_gpu:
             n = n.module
         n.load_state_dict(weights, strict=True)
+
+
+    if args.export_csv:
+        predictions = {}
 
     def run(net, loader, optimizer, train=False, epoch=0, pool=None):
         writer = train_writer
@@ -324,7 +338,6 @@ def main():
                 set_loss = utils.chamfer_loss(
                     torch.stack(progress), target_set.unsqueeze(0)
                 )
-
             elif args.loss == "hungarian":
                 set_loss = utils.hungarian_loss(
                     progress[-1], target_set, thread_pool=pool
@@ -410,23 +423,57 @@ def main():
                 else 0
             )
 
-            # Store predictions to be exported
+            
             if args.export_dir:
-                if len(true_export) < args.export_n:
-                    for p, m in zip(target_set, target_mask):
-                        true_export.append(p.detach().cpu())
-                    progress_steps = []
-                    for pro, ms in zip(progress, masks):
-                        # pro and ms are one step of the inner optim
-                        # score boxes contains the list of predicted elements
-                        # for one step
-                        score_boxes = []
-                        for p, m in zip(pro.cpu().detach(), ms.cpu().detach()):
-                            score_box = torch.cat([m.unsqueeze(0), p], dim=0)
-                            score_boxes.append(score_box)
-                        progress_steps.append(score_boxes)
-                    for b in zip(*progress_steps):
-                        pred_export.append(b)
+                # export last inner optim of each input as csv (one input per row)
+                if args.export_csv:
+                    # the second to last element are the last of the inner optim 
+                    for batch_i, p in enumerate(progress[-2]):
+                        img_id = i * args.batch_size + batch_i
+                        fname = loader.iterable.dataset.get_fname(img_id)
+                        im_x, im_y = loader.iterable.dataset.get_imsize(img_id)
+
+                        m = masks[-2][batch_i].cpu().detach().numpy().astype(bool)
+                        p = p.cpu().detach().numpy()
+                        p = p[:, m] * [[im_x], [im_y]]                        
+
+                        sample_preds = [p[k%2, k//2] for k in range(p.shape[1] * 2)]
+                        # remove values according to mask and add zeros to the end
+                        # in stead
+                        sample_preds += [0] * (len(m) * 2 - len(sample_preds))
+                        predictions[fname] = sample_preds
+
+
+                        # input_img = input[batch_i].detach().cpu()
+                        # plt.scatter(p[0, :]*128, p[1, :]*128)
+                        # plt.imshow(np.transpose(input_img, (1, 2, 0)))
+                        # plt.show()
+
+                        # if len(fname) == 8:
+                        #     ds = "faces"
+                        # else:
+                        #     ds = "cats"
+                        # img = mpimg.imread(ds + '/images/val/' + fname)
+                        # plt.scatter(p[0, :]*img.shape[1], p[1, :]*img.shape[0])
+                        # plt.imshow(img)
+                        # plt.show()
+                # Store predictions to be exported
+                else:
+                    if len(true_export) < args.export_n:
+                        for p, m in zip(target_set, target_mask):
+                            true_export.append(p.detach().cpu())
+                        progress_steps = []
+                        for pro, ms in zip(progress, masks):
+                            # pro and ms are one step of the inner optim
+                            # score boxes contains the list of predicted elements
+                            # for one step
+                            score_boxes = []
+                            for p, m in zip(pro.cpu().detach(), ms.cpu().detach()):
+                                score_box = torch.cat([m.unsqueeze(0), p], dim=0)
+                                score_boxes.append(score_box)
+                            progress_steps.append(score_boxes)
+                        for b in zip(*progress_steps):
+                            pred_export.append(b)
 
             # Plot predictions in Tensorboard
             if args.show and epoch % args.show_skip == 0 and not train:
@@ -442,6 +489,7 @@ def main():
                     progress.append(target_set)
                 masks.append(target_mask)
                 # intermediate sets
+
                 for j, (s, ms) in enumerate(zip(progress, masks)):
                     if args.dataset == "clevr-state":
                         continue
@@ -476,6 +524,7 @@ def main():
                             or args.dataset == "faces" \
                             or args.dataset == "wflw" \
                             or args.dataset == "merged":
+
                         img = input[0].detach().cpu()
 
                         fig = plt.figure()
@@ -499,7 +548,7 @@ def main():
                         writer.add_figure(tag_name, fig, global_step=j)
 
         # Export predictions
-        if args.export_dir:
+        if args.export_dir and not args.export_csv:
             os.makedirs(f"{args.export_dir}/groundtruths", exist_ok=True)
             os.makedirs(f"{args.export_dir}/detections", exist_ok=True)
             for i, (gt, dets) in enumerate(zip(true_export, pred_export)):
@@ -546,19 +595,35 @@ def main():
 
     torch.backends.cudnn.benchmark = True
 
-    print("Running")
+    metrics = {}
+
     start = time.time()
-    best_test_loss = float("inf")
-    best_train_loss = float("inf")
-    best_epoch = -1
 
-    best_train_set_loss = float("inf")
-    best_test_set_loss = float("inf")
-
-    for epoch in range(args.epochs):
+    if args.eval_only:
         tracker.new_epoch()
         with mp.Pool(10) as pool:
-            if not args.eval_only:
+            run(
+                net,
+                test_loader,
+                optimizer,
+                train=False,
+                epoch=0,
+                pool=pool
+            )
+
+        metrics["test_loss"] = np.mean(tracker.data["test_loss"][-1])
+        metrics["test_set_loss"] = np.mean(tracker.data["test_last"][-1])
+    else:
+        best_test_loss = float("inf")
+        best_train_loss = float("inf")
+        best_epoch = -1
+
+        best_train_set_loss = float("inf")
+        best_test_set_loss = float("inf")
+
+        for epoch in range(args.epochs):
+            tracker.new_epoch()
+            with mp.Pool(10) as pool:
                 run(
                     net,
                     train_loader,
@@ -567,55 +632,80 @@ def main():
                     epoch=epoch,
                     pool=pool
                 )
-            if not args.train_only:
-                run(
-                    net,
-                    test_loader,
-                    optimizer,
-                    train=False,
-                    epoch=epoch,
-                    pool=pool
-                )
+                if not args.train_only:
+                    run(
+                        net,
+                        test_loader,
+                        optimizer,
+                        train=False,
+                        epoch=epoch,
+                        pool=pool
+                    )
 
-        epoch_test_loss = np.mean(tracker.data["test_loss"][-1])
-        if epoch_test_loss < best_test_loss:
-            # only save if the epoch has lower loss
-            best_test_loss = epoch_test_loss
-            best_train_loss = np.mean(tracker.data["train_loss"][-1])
+            epoch_test_loss = np.mean(tracker.data["test_loss"][-1])
 
-            best_train_set_loss = np.mean(tracker.data["train_last"][-1])
-            best_test_set_loss = np.mean(tracker.data["test_last"][-1])
+            if epoch_test_loss < best_test_loss:
+                print("new best loss")
+                best_test_loss = epoch_test_loss
+                # only save if the epoch has lower loss
+                metrics["test_loss"] = epoch_test_loss
+                metrics["train_loss"] = np.mean(tracker.data["train_loss"][-1])
 
-            best_epoch = epoch
+                metrics["train_set_loss"] = np.mean(tracker.data["train_last"][-1])
+                metrics["test_set_loss"] = np.mean(tracker.data["test_last"][-1])
 
-            results = {
-                "name": name,
-                "tracker": tracker.data,
-                "weights": net.state_dict()
-                if not args.multi_gpu
-                else net.module.state_dict(),
-                "args": vars(args),
-                "hash": git_hash,
-            }
+                metrics["best_epoch"] = epoch
 
-            torch.save(results, os.path.join("logs", name))
-        if args.eval_only:
-            break
+                results = {
+                    "name": name + "_best",
+                    "tracker": tracker.data,
+                    "weights": net.state_dict()
+                    if not args.multi_gpu
+                    else net.module.state_dict(),
+                    "args": vars(args),
+                    "hash": git_hash,
+                }
+
+                torch.save(results, os.path.join("logs", name + "_best"))
+
+        results = {
+            "name": name + "_final",
+            "tracker": tracker.data,
+            "weights": net.state_dict()
+            if not args.multi_gpu
+            else net.module.state_dict(),
+            "args": vars(args),
+            "hash": git_hash,
+        }
+        torch.save(results, os.path.join("logs", name + "_final"))
+
+    if args.export_csv and args.export_dir:
+
+        cols = []
+        # get number of rows from any value, which is what this loop iterates over
+        for i in range(len(next(iter(predictions.values()))) // 2):
+            for l in ['x', 'y']:
+                cols.append(l + str(i))
+
+        pd.DataFrame.from_dict(predictions, orient="index", columns=cols).to_csv(
+            os.path.join(args.export_dir, 'predictions.csv'), 
+            sep=',', 
+            index_label="name"
+        )
 
     took = time.time() - start
     print(f"Process took {took:.1f}s, avg {took/args.epochs:.1f} s/epoch.")
 
     # save hyper parameters to tensorboard for reference
     hparams = {k: v for k, v in vars(args).items() if v is not None}
+
+    print(metrics)
     metrics = {
-        "mean_train_loss": best_train_loss,
-        "mean_test_loss": best_test_loss,
-        "best_train_set_loss": best_train_set_loss,
-        "best_test_set_loss": best_test_set_loss,
-        "best_epoch": best_epoch,
         "total_time": took,
         "avg_time_per_epoch": took/args.epochs
     }
+
+    print("writing hparams")
     train_writer.add_hparams(hparams, metric_dict=metrics, name="hparams")
 
 
