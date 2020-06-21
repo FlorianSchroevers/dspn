@@ -657,7 +657,7 @@ def main():
                 metrics["best_epoch"] = epoch
 
                 results = {
-                    "name": name + "_best",
+                    "name": name + "-best",
                     "tracker": tracker.data,
                     "weights": net.state_dict()
                     if not args.multi_gpu
@@ -666,10 +666,10 @@ def main():
                     "hash": git_hash,
                 }
 
-                torch.save(results, os.path.join("logs", name + "_best"))
+                torch.save(results, os.path.join("logs", name + "-best"))
 
         results = {
-            "name": name + "_final",
+            "name": name + "-final",
             "tracker": tracker.data,
             "weights": net.state_dict()
             if not args.multi_gpu
@@ -677,7 +677,7 @@ def main():
             "args": vars(args),
             "hash": git_hash,
         }
-        torch.save(results, os.path.join("logs", name + "_final"))
+        torch.save(results, os.path.join("logs", name + "-final"))
 
     if args.export_csv and args.export_dir:
 
@@ -685,12 +685,12 @@ def main():
         # get number of rows from any value, which is what this loop iterates over
         for i in range(len(next(iter(predictions.values()))) // 2):
             for l in ['x', 'y']:
-                cols.append(l + str(i))
+                cols.append(f"original_{i}_{l}")
 
         pd.DataFrame.from_dict(predictions, orient="index", columns=cols).to_csv(
             os.path.join(args.export_dir, 'predictions.csv'), 
             sep=',', 
-            index_label="name"
+            index_label="image_name"
         )
 
     took = time.time() - start
