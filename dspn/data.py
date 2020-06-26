@@ -264,13 +264,24 @@ class Cats(ImageDataset):
     def __init__(self, base_path, split, max_objects, full=False):
         super().__init__(base_path, split, max_objects, full)
 
-        ids, self.targets = self.prepare_keypoints()
+        ids, fnames, self.targets = self.prepare_keypoints()
 
         self.image_id_to_index = {img_id: i for i, img_id in enumerate(ids)}
+        self.image_id_to_fname = {img_id: f for img_id, f in zip(ids, fnames)}
+
+    def get_fname(self, item):
+        img_id = self.image_db["image_ids"][item]
+        return self.image_id_to_fname[img_id]
+
+    def get_imsize(self, item):
+        fname = self.get_fname(item)
+        img_path = os.path.join(self.base_path, "images", fname)
+        return Image.open(img_path).size
 
     def prepare_keypoints(self):
         targets = []
         ids = []
+        fnames = []
 
         # for img_id in self.image_db["image_ids"]:
         for fname in os.listdir(self.images_folder):
@@ -285,7 +296,8 @@ class Cats(ImageDataset):
                 # the dimensions are not uniform.
                 # this does not load the entire image into memory
                 img_path = os.path.join(self.images_folder, fname[:-4])
-                im_x, im_y = Image.open(img_path).size
+                img = Image.open(img_path).convert("RGB")
+                im_x, im_y = img.size
 
                 # there are 19 numbers in the .cat file, the first of which
                 # denotes the number of keypoints. the coordinates of
@@ -314,79 +326,12 @@ class Cats(ImageDataset):
             mask = torch.zeros(self.max_objects)
             mask[:n_objects] = 1
 
-            targets.append((objects, mask))
             ids.append(int(fname.split(".")[0].replace("_", "")))
-
-        return ids, targets
-
-
-class Faces(ImageDataset):
-    def __init__(self, base_path, split, max_objects, full=False):
-        super().__init__(base_path, split, max_objects, full)
-
-        self.targets = self.prepare_keypoints()
-
-    def prepare_keypoints(self):
-
-        # there are multiple keypoints per major feature (left eye, right eye.
-        # nose and mouth), so we want to calculate the mean of those keypoints
-        # per major feature, these are the indices for those features
-        left_eye_x_indices = [0, 4, 6, 12, 14]
-        left_eye_y_indices = [1, 5, 7, 13, 15]
-        right_eye_x_indices = [2, 8, 10, 16, 18]
-        right_eye_y_indices = [3, 9, 11, 17, 19]
-        nose__x_indices = [20]
-        nose__y_indices = [21]
-        mouth_x_indices = [22, 24, 26, 28]
-        mouth_y_indices = [23, 25, 27, 29]
-
-        # a dict mapping the final position in the array to one of the major
-        # facial keypoints
-        features = {
-            0: (left_eye_x_indices, left_eye_y_indices),
-            1: (right_eye_x_indices, right_eye_y_indices),
-            2: (nose__x_indices, nose__y_indices),
-            3: (mouth_x_indices, mouth_y_indices)
-        }
-
-        keypoints_array = np.genfromtxt(
-            os.path.join(self.base_path, "facial_keypoints.csv"),
-            delimiter=',',
-            missing_values=0
-        )
-
-        keypoints_array = np.nan_to_num(keypoints_array, copy=False)
-
-        targets = []
-        for img_keypoints in keypoints_array:
-            # four keypoints, x and y components
-            coords = np.empty((2, 4))
-
-            # calculate means without zeros, and normalize by dividing by
-            # image size (96x96)
-            for i in features:
-                for dim in [0, 1]:
-                    total = img_keypoints[features[i][dim]].sum()
-                    count = (img_keypoints[features[i][dim]] != 0).sum()
-                    # in case the count is zero, the value should just be zero
-                    if count == 0:
-                        coords[dim, i] = 0
-                    else:
-                        coords[dim, i] = (total / count) / 96
-
-            # overlay objects on zero array holding up to max_objects
-            objects = np.zeros(shape=(2, self.max_objects))
-            objects[:, :coords.shape[1]] = coords
-
-            objects = torch.FloatTensor(objects)
-
-            # fill in masks
-            mask = torch.zeros(self.max_objects)
-            mask[:coords.shape[1]] = 1
-
+            fnames.append(os.path.join(self.split, fname[:-4]))
             targets.append((objects, mask))
 
-        return targets
+        return ids, fnames, targets
+
 
 class WFLW(torch.utils.data.Dataset):
     def __init__(self, base_path, split, max_objects, full=False):
@@ -398,16 +343,17 @@ class WFLW(torch.utils.data.Dataset):
 
         target_ids = [96, 97, 54, 76, 82, 2, 30]
         self.target_cols = []
-        
+
         for target_id in target_ids:
             for dim in ['x', 'y']:
                 self.target_cols.append(f"original_{target_id}_{dim}")
 
-
         self.annotations = self.get_annotations()
 
     def get_annotations(self):
-        return pd.read_csv(os.path.join(self.base_path, f"face_landmarks_wflw_{self.split}.csv"))
+        return pd.read_csv(
+            os.path.join(self.base_path,
+                         f"face_landmarks_wflw_{self.split}.csv"))
 
     def get_fname(self, item):
         itemrow = self.annotations.iloc[item]
@@ -420,6 +366,33 @@ class WFLW(torch.utils.data.Dataset):
         img = Image.open(path).convert("RGB")
         return img.size
 
+    def get_bbox(self, targets):
+        lx = min(targets[0, :])
+        hx = max(targets[0, :])
+
+        ly = min(targets[1, :])
+        hy = max(targets[1, :])
+
+        return (lx, ly), (hx, hy)
+
+    def get_crop(self, img, targets, scale_mean=2.5, scale_std=0.3):
+        (x1, y1), (x2, y2) = self.get_bbox(targets)
+
+        scale = max(1, np.random.normal(scale_mean, scale_std))
+        bbox_margin = ((x2 - x1) * scale)/2
+
+        new_x1 = x1 - bbox_margin
+        new_x2 = x2 + bbox_margin
+
+        new_y1 = y1 - bbox_margin
+        new_y2 = y2 + bbox_margin
+
+        new_targets = targets - [[new_x1], [new_y1]]
+
+        cropped_img = img.crop((new_x1, new_y1, new_x2, new_y2))
+
+        return cropped_img, new_targets
+
     def __getitem__(self, item):
         itemrow = self.annotations.iloc[item]
         fname = itemrow["image_name"]
@@ -427,15 +400,11 @@ class WFLW(torch.utils.data.Dataset):
         img = Image.open(path).convert("RGB")
         im_x, im_y = img.size
 
-        transform = transforms.Compose(
-            [transforms.Resize((128, 128)), transforms.ToTensor()]
-        )
+        targets = itemrow[self.target_cols].values.reshape(-1, 2).T
 
-        img = transform(img)
-        
-        targets = itemrow[self.target_cols].values
+        img, targets = self.get_crop(img, targets)
 
-        targets = targets.reshape(-1, 2).T / [[im_x], [im_y]]
+        targets /= [[img.size[0]], [img.size[1]]]
         n_objects = targets.shape[1]
 
         if n_objects > self.max_objects:
@@ -451,6 +420,15 @@ class WFLW(torch.utils.data.Dataset):
         # fill in masks
         mask = torch.zeros(self.max_objects)
         mask[:n_objects] = 1
+
+        transform = transforms.Compose(
+            [transforms.Resize((128, 128)), transforms.ToTensor()]
+            # [transforms.ToTensor()]
+        )
+
+        img = transform(img)
+
+        # print(objects)
 
         return img, objects, mask
 
@@ -469,15 +447,27 @@ class MergedDataset(torch.utils.data.Dataset):
         for i in range(1, len(datasets)):
             assert datasets[i].max_objects == datasets[i - 1].max_objects
 
-    def __getitem__(self, item):
+    def get_dataset(self, item):
         total = 0
         for dataset in self.datasets:
             if item < len(dataset) + total:
-                return dataset[item - total - 1]
+                return dataset, item - total - 1
             else:
                 total += len(dataset)
 
         raise IndexError()
+
+    def get_fname(self, item):
+        dataset, index = self.get_dataset(item)
+        return dataset.get_fname(index)
+
+    def get_imsize(self, item):
+        dataset, index = self.get_dataset(item)
+        return dataset.get_imsize(index)
+
+    def __getitem__(self, item):
+        dataset, index = self.get_dataset(item)
+        return dataset[index]
 
     def __len__(self):
         return sum([len(ds) for ds in self.datasets])

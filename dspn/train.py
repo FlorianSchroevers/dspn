@@ -8,12 +8,10 @@ import torch.nn.functional as F
 import torch.multiprocessing as mp
 
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 import matplotlib
-import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
-# import tkinter
-# matplotlib.use('TkAgg')
 
 from tensorboardX import SummaryWriter
 
@@ -22,9 +20,8 @@ import track
 import model
 import utils
 
-import pandas as pd
-
 matplotlib.use("Qt5Agg")
+
 
 def main():
     global net
@@ -65,7 +62,7 @@ def main():
     parser.add_argument(
         "--dataset",
         choices=[
-            "mnist", "clevr-box", "clevr-state", "cats", "faces", "merged", "wflw"
+            "mnist", "clevr-box", "clevr-state", "cats", "merged", "wflw"
         ],
         help="Which dataset to use",
     )
@@ -167,6 +164,10 @@ def main():
         action="store_true",
         help="Only perform predictions, don't evaluate in any way"
     )
+    parser.add_argument(
+        "--eval-split",
+        help="Overwrite split on test set"
+    )
 
     args = parser.parse_args()
 
@@ -233,24 +234,29 @@ def main():
         dataset_train = data.Faces("faces", "train", 4, full=args.full_eval)
         dataset_test = data.Faces("faces", "val", 4, full=args.full_eval)
     elif args.dataset == "wflw":
+        if args.eval_split:
+            eval_split = f"test_{args.eval_split}"
+        else:
+            eval_split = "test"
+
         dataset_train = data.WFLW("wflw", "train", 7, full=args.full_eval)
-        dataset_test = data.WFLW("wflw", "test", 7, full=args.full_eval)
+        dataset_test = data.WFLW("wflw", eval_split, 7, full=args.full_eval)
     elif args.dataset == "merged":
         # merged cats and human faces
         dataset_train_cats = data.Cats("cats", "train", 9, full=args.full_eval)
-        dataset_train_faces = data.WFLW("wflw", "train", 9, full=args.full_eval)
+        dataset_train_wflw = data.WFLW("wflw", "train", 9, full=args.full_eval)
 
         dataset_test_cats = data.Cats("cats", "val", 9, full=args.full_eval)
-        dataset_test_faces = data.WFLW("wflw", "test", 9, full=args.full_eval)
+        dataset_test_wflw = data.WFLW("wflw", "test", 9, full=args.full_eval)
 
         dataset_train = data.MergedDataset(
             dataset_train_cats,
-            dataset_train_faces
+            dataset_train_wflw
         )
 
         dataset_test = data.MergedDataset(
             dataset_test_cats,
-            dataset_test_faces
+            dataset_test_wflw
         )
 
     if not args.eval_only:
@@ -285,9 +291,10 @@ def main():
             n = n.module
         n.load_state_dict(weights, strict=True)
 
-
     if args.export_csv:
-        predictions = {}
+        names = []
+        predictions = []
+        export_targets = []
 
     def run(net, loader, optimizer, train=False, epoch=0, pool=None):
         writer = train_writer
@@ -423,25 +430,43 @@ def main():
                 else 0
             )
 
-            
             if args.export_dir:
-                # export last inner optim of each input as csv (one input per row)
+                # export last inner optim of each input as csv
+                # (one input per row)
                 if args.export_csv:
-                    # the second to last element are the last of the inner optim 
+                    # the second to last element are the last of the
+                    # inner optim
                     for batch_i, p in enumerate(progress[-2]):
                         img_id = i * args.batch_size + batch_i
-                        fname = loader.iterable.dataset.get_fname(img_id)
-                        im_x, im_y = loader.iterable.dataset.get_imsize(img_id)
 
-                        m = masks[-2][batch_i].cpu().detach().numpy().astype(bool)
+                        names.append(loader.iterable.dataset.get_fname(img_id))
+
+                        m = masks[-2][batch_i]
+                        m = m.cpu().detach().numpy().astype(bool)
+
                         p = p.cpu().detach().numpy()
-                        p = p[:, m] * [[im_x], [im_y]]                        
+                        p = p[:, m]
 
-                        sample_preds = [p[k%2, k//2] for k in range(p.shape[1] * 2)]
-                        # remove values according to mask and add zeros to the end
-                        # in stead
+                        sample_preds = [
+                            p[k % 2, k // 2] for k in range(p.shape[1] * 2)
+                        ]
+                        # remove values according to mask and add zeros to the
+                        # end in stead
                         sample_preds += [0] * (len(m) * 2 - len(sample_preds))
-                        predictions[fname] = sample_preds
+                        predictions.append(sample_preds)
+
+                        true_mask = target_set[batch_i, 2, :].cpu().detach()
+                        true_mask = true_mask.numpy().astype(bool)
+                        trues = target_set[batch_i, :2, :]
+                        trues = trues.cpu().detach().numpy()
+
+                        t = trues[:, true_mask]
+
+                        t = [t[k % 2, k // 2] for k in range(t.shape[1] * 2)]
+
+                        t += [0] * (len(true_mask) * 2 - len(t))
+
+                        export_targets.append(t)
 
                 # Store predictions to be exported
                 else:
@@ -451,11 +476,16 @@ def main():
                         progress_steps = []
                         for pro, ms in zip(progress, masks):
                             # pro and ms are one step of the inner optim
-                            # score boxes contains the list of predicted elements
-                            # for one step
+                            # score boxes contains the list of predicted
+                            # elements for one step
                             score_boxes = []
-                            for p, m in zip(pro.cpu().detach(), ms.cpu().detach()):
-                                score_box = torch.cat([m.unsqueeze(0), p], dim=0)
+                            for p, m in zip(
+                                            pro.cpu().detach(),
+                                            ms.cpu().detach()):
+                                score_box = torch.cat(
+                                    [m.unsqueeze(0), p],
+                                    dim=0
+                                )
                                 score_boxes.append(score_box)
                             progress_steps.append(score_boxes)
                         for b in zip(*progress_steps):
@@ -507,7 +537,6 @@ def main():
                             global_step=j
                         )
                     elif args.dataset == "cats" \
-                            or args.dataset == "faces" \
                             or args.dataset == "wflw" \
                             or args.dataset == "merged":
 
@@ -601,11 +630,6 @@ def main():
         metrics["test_set_loss"] = np.mean(tracker.data["test_last"][-1])
     else:
         best_test_loss = float("inf")
-        best_train_loss = float("inf")
-        best_epoch = -1
-
-        best_train_set_loss = float("inf")
-        best_test_set_loss = float("inf")
 
         for epoch in range(args.epochs):
             tracker.new_epoch()
@@ -637,8 +661,10 @@ def main():
                 metrics["test_loss"] = epoch_test_loss
                 metrics["train_loss"] = np.mean(tracker.data["train_loss"][-1])
 
-                metrics["train_set_loss"] = np.mean(tracker.data["train_last"][-1])
-                metrics["test_set_loss"] = np.mean(tracker.data["test_last"][-1])
+                metrics["train_set_loss"] = np.mean(
+                    tracker.data["train_last"][-1])
+                metrics["test_set_loss"] = np.mean(
+                    tracker.data["test_last"][-1])
 
                 metrics["best_epoch"] = epoch
 
@@ -666,20 +692,14 @@ def main():
         torch.save(results, os.path.join("logs", name + "-final"))
 
     if args.export_csv and args.export_dir:
+        path = os.path.join(args.export_dir, f'{args.name}-predictions.csv')
+        pd.DataFrame(np.array(predictions), index=names).to_csv(
+            path, sep=',', index=names, header=False
+        )
 
-        if args.dataset == "wflw":
-            cols = dataset_test.target_cols
-        else:
-            cols = []
-            # get number of rows from any value, which is what this loop iterates over
-            for i in range(len(next(iter(predictions.values()))) // 2):
-                for l in ['x', 'y']:
-                    cols.append(f"original_{i}_{l}")
-
-        pd.DataFrame.from_dict(predictions, orient="index", columns=cols).to_csv(
-            os.path.join(args.export_dir, f'{args.name}-predictions.csv'), 
-            sep=',', 
-            index_label="image_name"
+        path = os.path.join(args.export_dir, f'{args.name}-targets.csv')
+        pd.DataFrame(np.array(export_targets), index=names).to_csv(
+            path, sep=',', index=names, header=False
         )
 
     took = time.time() - start
